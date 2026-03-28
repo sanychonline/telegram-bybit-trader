@@ -4,10 +4,8 @@ services:
       context: .
       dockerfile: dockerfiles/Dockerfile
 
-    image: ${SYSTEM_NAME:-tg-bybit-bot}:latest
-    container_name: ${SYSTEM_NAME:-tg-bybit-bot}
-    user: "${PUID:-1000}:${PGID:-1000}"
-
+    image: trader-bot:latest
+    container_name: trader-bot
     env_file:
       - .env
 
@@ -32,26 +30,21 @@ services:
       context: .
       dockerfile: dockerfiles/Dockerfile
 
-    image: ${SYSTEM_NAME:-tg-bybit-bot}:latest
-    container_name: ${SYSTEM_NAME:-tg-bybit-bot}-ui
-    user: "${PUID:-1000}:${PGID:-1000}"
-
+    image: trader-bot-ui:latest
+    container_name: trader-bot-ui
     env_file:
       - .env
 
     environment:
-      UI_PROXY_TARGET: "http://bot:${DASHBOARD_PORT:-9988}"
+      UI_PROXY_TARGET: "http://bot:${DASHBOARD_PORT:-1002}"
 
     command: ["python", "-m", "classes.reporting.ui_proxy"]
 
     depends_on:
       - bot
 
-    profiles:
-      - dashboard
-
     ports:
-      - "${DASHBOARD_PORT:-9988}:${DASHBOARD_PORT:-9988}"
+      - "${DASHBOARD_PORT:-1002}:${DASHBOARD_PORT:-1002}"
 
     restart: unless-stopped
 

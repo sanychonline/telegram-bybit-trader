@@ -54,7 +54,6 @@ On first successful login the file will be created automatically.
 ### 3. Important `.env` variables
 
 - `SYSTEM_NAME` — Docker image/container name
-- `PUID` / `PGID` — runtime UID/GID
 - `DATA_DIR` — container path for mounted local `./data`
 - `TZ` — timezone used in logs
 - `BRAND_NAME` — your visible project brand used in the dashboard title, footer, and browser tab label
@@ -71,16 +70,10 @@ On first successful login the file will be created automatically.
 
 ## Run
 
-Start backend only:
+Start:
 
 ```bash
 docker compose up --build -d
-```
-
-Start backend + dashboard UI:
-
-```bash
-COMPOSE_PROFILES=dashboard docker compose up --build -d
 ```
 
 Stop:
@@ -101,9 +94,8 @@ Dashboard:
 http://localhost:1002/
 ```
 
-The dashboard is optional. After the UI split, it starts only when both conditions are true:
+The UI container starts together with the backend. The actual dashboard must still be enabled with:
 - `DASHBOARD_ENABLED=true` in `.env`
-- Compose is started with the `dashboard` profile
 
 ## How it works
 
@@ -135,7 +127,7 @@ Behavior notes:
 
 ## Dashboard
 
-When the `dashboard` profile is enabled and `DASHBOARD_ENABLED=true`, the project runs:
+When `DASHBOARD_ENABLED=true`, the project runs:
 - `bot` — trade execution backend
 - `ui` — dashboard container that proxies requests to the backend API
 

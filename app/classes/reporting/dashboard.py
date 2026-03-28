@@ -1,10 +1,11 @@
 import asyncio
 import json
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from zoneinfo import ZoneInfo
 
-from classes.config import BRAND_NAME, DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_REFRESH_SEC
+from classes.config import BRAND_NAME, DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_REFRESH_SEC, TZ
 
 
 class DashboardService:
@@ -15,6 +16,7 @@ class DashboardService:
         self.host = DASHBOARD_HOST
         self.port = DASHBOARD_PORT
         self.refresh_sec = max(2, DASHBOARD_REFRESH_SEC)
+        self.local_tz = ZoneInfo(TZ)
         self._server = None
         self._thread = None
 
@@ -53,20 +55,21 @@ class DashboardService:
         return wins, losses, breakevens, realized, closed_rows
 
     def _range_bounds(self, range_key):
-        now = datetime.utcnow()
+        now = datetime.now(self.local_tz)
         if range_key == "today":
-            return datetime(now.year, now.month, now.day), None
+            return datetime(now.year, now.month, now.day, tzinfo=self.local_tz), None
         if range_key == "current_month":
-            return datetime(now.year, now.month, 1), None
+            return datetime(now.year, now.month, 1, tzinfo=self.local_tz), None
         if range_key == "month":
             return now - timedelta(days=30), None
         if range_key == "previous_month":
-            current_month_start = datetime(now.year, now.month, 1)
+            current_month_start = datetime(now.year, now.month, 1, tzinfo=self.local_tz)
             previous_month_end = current_month_start
             previous_month_start = datetime(
                 previous_month_end.year - (1 if previous_month_end.month == 1 else 0),
                 12 if previous_month_end.month == 1 else previous_month_end.month - 1,
                 1,
+                tzinfo=self.local_tz,
             )
             return previous_month_start, previous_month_end
         if range_key == "half_year":
@@ -74,7 +77,10 @@ class DashboardService:
         if range_key == "year":
             return now - timedelta(days=365), None
         if range_key == "previous_year":
-            return datetime(now.year - 1, 1, 1), datetime(now.year, 1, 1)
+            return (
+                datetime(now.year - 1, 1, 1, tzinfo=self.local_tz),
+                datetime(now.year, 1, 1, tzinfo=self.local_tz),
+            )
         return None, None
 
     def _filter_closed_trades(self, trades, range_key):
@@ -230,7 +236,12 @@ class DashboardService:
         if not raw:
             return None
         try:
-            return datetime.fromisoformat(raw)
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            return dt.astimezone(self.local_tz)
         except Exception:
             return None
 
@@ -286,7 +297,7 @@ class DashboardService:
         start_balance = current_wallet - total_realized
         running_balance = start_balance
         points = [{
-            "dt": enriched[0]["dt"] if enriched else datetime.utcnow(),
+            "dt": enriched[0]["dt"] if enriched else datetime.now(self.local_tz),
             "label": "start",
             "balance": round(start_balance, 4),
         }]
@@ -390,6 +401,35 @@ class DashboardService:
       font: inherit;
       cursor: pointer;
       white-space: nowrap;
+    }}
+    .controls {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }}
+    .lang-control {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 9px 12px;
+      white-space: nowrap;
+    }}
+    .lang-select {{
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      outline: none;
+      cursor: pointer;
+    }}
+    .lang-select option {{
+      color: #111;
     }}
     .cards {{
       display: grid;
@@ -617,7 +657,20 @@ class DashboardService:
   <div class="wrap">
     <div class="topbar">
       <h1>Trader Bot Dashboard</h1>
-      <button id="theme-toggle" class="theme-toggle" type="button">Theme: auto</button>
+      <div class="controls">
+        <label class="lang-control" for="lang-select">
+          <span>🌐</span>
+          <select id="lang-select" class="lang-select" aria-label="Language">
+            <option value="en">🇬🇧 English</option>
+            <option value="de">🇩🇪 Deutsch</option>
+            <option value="es">🇪🇸 Español</option>
+            <option value="pl">🇵🇱 Polski</option>
+            <option value="uk">🇺🇦 Українська</option>
+            <option value="fr">🇫🇷 Français</option>
+          </select>
+        </label>
+        <button id="theme-toggle" class="theme-toggle" type="button">Theme: auto</button>
+      </div>
     </div>
     <div class="subbar">
       <div class="range-switch range-switch-top">
@@ -664,8 +717,22 @@ class DashboardService:
   <script>
     const refreshMs = {refresh_ms};
     const baseTitle = '{BRAND_NAME} Trader';
+    const langCookie = 'ui_lang';
     let currentRange = 'current_month';
+    let currentLang = 'en';
     let chartState = [];
+    const translations = {{
+      en: {{ theme: 'Theme', statsPeriod: 'Stats Period', noActive: 'No active trades', noClosed: 'No closed trades', 'today': 'today', 'current month': 'current month', 'month': 'month', 'previous month': 'previous month', 'half of year': 'half of year', 'year': 'year', 'previous year': 'previous year', 'all time': 'all time', 'Trader Bot Dashboard': 'Trader Bot Dashboard', 'Active Trades': 'Active Trades', 'Closed Trades': 'Closed Trades', 'Balance Curve': 'Balance Curve', 'Loading balance curve...': 'Loading balance curve...', 'Symbol': 'Symbol', 'Status': 'Status', 'Last': 'Last', 'Health': 'Health', 'Realized': 'Realized', 'Unrealized': 'Unrealized', 'Reason': 'Reason', 'Updated': 'Updated', 'Available Balance': 'Available Balance', 'Wallet Balance': 'Wallet Balance', 'Equity': 'Equity', 'Open Trades': 'Open Trades', 'Winrate': 'Winrate', 'Non-Loss Rate': 'Non-Loss Rate', 'Realized PnL': 'Realized PnL', 'Unrealized PnL': 'Unrealized PnL', 'Wins': 'Wins', 'Losses': 'Losses', 'TP hits': 'TP hits', 'SL hits': 'SL hits', 'TAKE PROFIT': 'TAKE PROFIT', 'STOP LOSS': 'STOP LOSS', 'BREAKEVEN': 'BREAKEVEN', 'NO ENTRY': 'NO ENTRY', 'PENDING': 'PENDING', 'LIVE': 'LIVE' }},
+      de: {{ theme: 'Thema', statsPeriod: 'Statistikzeitraum', noActive: 'Keine aktiven Trades', noClosed: 'Keine geschlossenen Trades', 'today': 'heute', 'current month': 'aktueller Monat', 'month': 'Monat', 'previous month': 'letzter Monat', 'half of year': 'halbes Jahr', 'year': 'Jahr', 'previous year': 'letztes Jahr', 'all time': 'gesamte Zeit', 'Trader Bot Dashboard': 'Trader-Bot-Dashboard', 'Active Trades': 'Aktive Trades', 'Closed Trades': 'Geschlossene Trades', 'Balance Curve': 'Bilanzkurve', 'Loading balance curve...': 'Bilanzkurve wird geladen...', 'Symbol': 'Symbol', 'Status': 'Status', 'Last': 'Letzter', 'Health': 'Gesundheit', 'Realized': 'Realisiert', 'Unrealized': 'Unrealisiert', 'Reason': 'Grund', 'Updated': 'Aktualisiert', 'Available Balance': 'Verfügbares Guthaben', 'Wallet Balance': 'Wallet-Guthaben', 'Equity': 'Kapital', 'Open Trades': 'Offene Trades', 'Winrate': 'Trefferquote', 'Non-Loss Rate': 'Ohne Verlust', 'Realized PnL': 'Realisierter PnL', 'Unrealized PnL': 'Unrealisierter PnL', 'Wins': 'Gewinne', 'Losses': 'Verluste', 'TP hits': 'TP Treffer', 'SL hits': 'SL Treffer', 'TAKE PROFIT': 'GEWINN MITGENOMMEN', 'STOP LOSS': 'STOPP-LOSS', 'BREAKEVEN': 'BREAKEVEN', 'NO ENTRY': 'KEIN EINSTIEG', 'PENDING': 'AUSSTEHEND', 'LIVE': 'LIVE' }},
+      es: {{ theme: 'Tema', statsPeriod: 'Período estadístico', noActive: 'No hay operaciones activas', noClosed: 'No hay operaciones cerradas', 'today': 'hoy', 'current month': 'mes actual', 'month': 'mes', 'previous month': 'mes anterior', 'half of year': 'medio año', 'year': 'año', 'previous year': 'año anterior', 'all time': 'todo el tiempo', 'Trader Bot Dashboard': 'Panel del trader bot', 'Active Trades': 'Operaciones activas', 'Closed Trades': 'Operaciones cerradas', 'Balance Curve': 'Curva de balance', 'Loading balance curve...': 'Cargando curva de balance...', 'Symbol': 'Símbolo', 'Status': 'Estado', 'Last': 'Último', 'Health': 'Salud', 'Realized': 'Realizado', 'Unrealized': 'No realizado', 'Reason': 'Motivo', 'Updated': 'Actualizado', 'Available Balance': 'Balance disponible', 'Wallet Balance': 'Balance de wallet', 'Equity': 'Equity', 'Open Trades': 'Operaciones abiertas', 'Winrate': 'Winrate', 'Non-Loss Rate': 'Sin pérdida', 'Realized PnL': 'PnL realizado', 'Unrealized PnL': 'PnL no realizado', 'Wins': 'Ganadas', 'Losses': 'Perdidas', 'TP hits': 'TP logrados', 'SL hits': 'SL alcanzados', 'TAKE PROFIT': 'TAKE PROFIT', 'STOP LOSS': 'STOP LOSS', 'BREAKEVEN': 'BREAKEVEN', 'NO ENTRY': 'SIN ENTRADA', 'PENDING': 'PENDIENTE', 'LIVE': 'LIVE' }},
+      pl: {{ theme: 'Motyw', statsPeriod: 'Okres statystyk', noActive: 'Brak aktywnych transakcji', noClosed: 'Brak zamkniętych transakcji', 'today': 'dzisiaj', 'current month': 'bieżący miesiąc', 'month': 'miesiąc', 'previous month': 'poprzedni miesiąc', 'half of year': 'pół roku', 'year': 'rok', 'previous year': 'poprzedni rok', 'all time': 'cały czas', 'Trader Bot Dashboard': 'Panel tradera', 'Active Trades': 'Aktywne transakcje', 'Closed Trades': 'Zamknięte transakcje', 'Balance Curve': 'Krzywa salda', 'Loading balance curve...': 'Ładowanie krzywej salda...', 'Symbol': 'Symbol', 'Status': 'Status', 'Last': 'Ostatni', 'Health': 'Stan', 'Realized': 'Zrealizowane', 'Unrealized': 'Niezrealizowane', 'Reason': 'Powód', 'Updated': 'Zaktualizowano', 'Available Balance': 'Dostępne saldo', 'Wallet Balance': 'Saldo portfela', 'Equity': 'Kapitał', 'Open Trades': 'Otwarte transakcje', 'Winrate': 'Winrate', 'Non-Loss Rate': 'Bez straty', 'Realized PnL': 'Zrealizowany PnL', 'Unrealized PnL': 'Niezrealizowany PnL', 'Wins': 'Wygrane', 'Losses': 'Straty', 'TP hits': 'TP trafione', 'SL hits': 'SL trafione', 'TAKE PROFIT': 'TAKE PROFIT', 'STOP LOSS': 'STOP LOSS', 'BREAKEVEN': 'BREAKEVEN', 'NO ENTRY': 'BRAK WEJŚCIA', 'PENDING': 'OCZEKUJE', 'LIVE': 'LIVE' }},
+      uk: {{ theme: 'Тема', statsPeriod: 'Період статистики', noActive: 'Немає активних угод', noClosed: 'Немає закритих угод', 'today': 'сьогодні', 'current month': 'поточний місяць', 'month': 'місяць', 'previous month': 'попередній місяць', 'half of year': 'пів року', 'year': 'рік', 'previous year': 'попередній рік', 'all time': 'за весь час', 'Trader Bot Dashboard': 'Панель Trader Bot', 'Active Trades': 'Активні угоди', 'Closed Trades': 'Закриті угоди', 'Balance Curve': 'Крива балансу', 'Loading balance curve...': 'Завантаження кривої балансу...', 'Symbol': 'Символ', 'Status': 'Статус', 'Last': 'Остання', 'Health': 'Здоровʼя', 'Realized': 'Реалізовано', 'Unrealized': 'Нереалізовано', 'Reason': 'Причина', 'Updated': 'Оновлено', 'Available Balance': 'Доступний баланс', 'Wallet Balance': 'Баланс гаманця', 'Equity': 'Капітал', 'Open Trades': 'Відкриті угоди', 'Winrate': 'Вінрейт', 'Non-Loss Rate': 'Без збитку', 'Realized PnL': 'Реалізований PnL', 'Unrealized PnL': 'Нереалізований PnL', 'Wins': 'Перемоги', 'Losses': 'Поразки', 'TP hits': 'TP спрацювання', 'SL hits': 'SL спрацювання', 'TAKE PROFIT': 'ТЕЙК ПРОФІТ', 'STOP LOSS': 'СТОП ЛОС', 'BREAKEVEN': 'БЕЗЗБИТКОВО', 'NO ENTRY': 'БЕЗ ВХОДУ', 'PENDING': 'ОЧІКУЄТЬСЯ', 'LIVE': 'LIVE' }},
+      fr: {{ theme: 'Thème', statsPeriod: 'Période de stats', noActive: 'Aucun trade actif', noClosed: 'Aucun trade clôturé', 'today': "aujourd'hui", 'current month': 'mois en cours', 'month': 'mois', 'previous month': 'mois précédent', 'half of year': 'demi-année', 'year': 'année', 'previous year': 'année précédente', 'all time': 'toute la période', 'Trader Bot Dashboard': 'Tableau du trader bot', 'Active Trades': 'Trades actifs', 'Closed Trades': 'Trades clôturés', 'Balance Curve': 'Courbe du solde', 'Loading balance curve...': 'Chargement de la courbe du solde...', 'Symbol': 'Symbole', 'Status': 'Statut', 'Last': 'Dernier', 'Health': 'Santé', 'Realized': 'Réalisé', 'Unrealized': 'Non réalisé', 'Reason': 'Raison', 'Updated': 'Mis à jour', 'Available Balance': 'Solde disponible', 'Wallet Balance': 'Solde wallet', 'Equity': 'Équité', 'Open Trades': 'Trades ouverts', 'Winrate': 'Taux de réussite', 'Non-Loss Rate': 'Sans perte', 'Realized PnL': 'PnL réalisé', 'Unrealized PnL': 'PnL non réalisé', 'Wins': 'Gains', 'Losses': 'Pertes', 'TP hits': 'TP touchés', 'SL hits': 'SL touchés', 'TAKE PROFIT': 'TAKE PROFIT', 'STOP LOSS': 'STOP LOSS', 'BREAKEVEN': 'BREAKEVEN', 'NO ENTRY': "PAS D'ENTRÉE", 'PENDING': 'EN ATTENTE', 'LIVE': 'LIVE' }},
+    }};
+    function tr(text) {{
+      const dict = translations[currentLang] || translations.en;
+      return dict[text] || translations.en[text] || text;
+    }}
     function fmt(n) {{ return Number(n || 0).toFixed(2); }}
     function cls(n) {{
       const v = Number(n || 0);
@@ -694,6 +761,17 @@ class DashboardService:
       const expires = new Date(Date.now() + days * 86400000).toUTCString();
       document.cookie = `${{name}}=${{encodeURIComponent(value)}}; expires=${{expires}}; path=/; SameSite=Lax`;
     }}
+    function detectLanguage() {{
+      const supported = ['en', 'de', 'es', 'pl', 'uk', 'fr'];
+      const fromCookie = getCookie(langCookie);
+      if (supported.includes(fromCookie)) return fromCookie;
+      const langs = Array.isArray(navigator.languages) && navigator.languages.length ? navigator.languages : [navigator.language || 'en'];
+      for (const item of langs) {{
+        const base = String(item || '').toLowerCase().split('-')[0];
+        if (supported.includes(base)) return base;
+      }}
+      return 'en';
+    }}
     function detectAutoTheme() {{
       const hour = new Date().getHours();
       return hour >= 7 && hour < 20 ? 'day' : 'night';
@@ -702,13 +780,53 @@ class DashboardService:
       const effective = mode === 'auto' ? detectAutoTheme() : mode;
       document.documentElement.classList.toggle('day-theme', effective === 'day');
       const button = document.getElementById('theme-toggle');
-      if (button) button.textContent = `Theme: ${{mode}}`;
+      if (button) button.textContent = `${{tr('theme')}}: ${{mode}}`;
+    }}
+    function applyLanguage(lang) {{
+      currentLang = translations[lang] ? lang : 'en';
+      setCookie(langCookie, currentLang);
+      const select = document.getElementById('lang-select');
+      if (select) select.value = currentLang;
+      document.querySelector('.topbar h1').textContent = tr('Trader Bot Dashboard');
+      document.querySelector('.range-label').textContent = tr('Stats Period');
+      document.querySelectorAll('#range-select option').forEach(option => {{
+        option.textContent = tr(option.value.replaceAll('_', ' '));
+      }});
+      const panelTitles = document.querySelectorAll('.panel h3');
+      if (panelTitles[0]) panelTitles[0].textContent = tr('Active Trades');
+      if (panelTitles[1]) panelTitles[1].textContent = tr('Closed Trades');
+      if (panelTitles[2]) panelTitles[2].textContent = tr('Balance Curve');
+      document.getElementById('equity-caption').textContent = tr('Loading balance curve...');
+      document.querySelectorAll('th').forEach(th => {{
+        th.textContent = tr(th.textContent.trim());
+      }});
+      applyTheme(getCookie('ui_theme') || 'auto');
+    }}
+    function applyEmbedMode() {{
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('embed') !== '1') return;
+      const button = document.getElementById('theme-toggle');
+      if (button) button.style.display = 'none';
+      const lang = document.getElementById('lang-select')?.closest('.lang-control');
+      if (lang) lang.style.display = 'none';
     }}
     function initThemeToggle() {{
       const order = ['auto', 'day', 'night'];
       let mode = getCookie('ui_theme') || 'auto';
       if (!order.includes(mode)) mode = 'auto';
       applyTheme(mode);
+      window.addEventListener('message', (event) => {{
+        if (event.origin !== window.location.origin) return;
+        const data = event.data || {{}};
+        if (data.type === 'ui-theme-change' && order.includes(data.mode)) {{
+          mode = data.mode;
+          setCookie('ui_theme', mode);
+          applyTheme(mode);
+        }}
+        if (data.type === 'ui-language-change' && data.lang) {{
+          applyLanguage(data.lang);
+        }}
+      }});
       const button = document.getElementById('theme-toggle');
       if (!button) return;
       button.addEventListener('click', () => {{
@@ -737,17 +855,17 @@ class DashboardService:
     function formatReason(value) {{
       const raw = String(value || 'CLOSED').trim().toUpperCase();
       const labels = {{
-        TAKE_PROFIT: 'TAKE PROFIT',
-        STOP_LOSS: 'STOP LOSS',
-        BREAKEVEN: 'BREAKEVEN',
-        NO_ENTRY_TIMEOUT: 'NO ENTRY',
+        TAKE_PROFIT: tr('TAKE PROFIT'),
+        STOP_LOSS: tr('STOP LOSS'),
+        BREAKEVEN: tr('BREAKEVEN'),
+        NO_ENTRY_TIMEOUT: tr('NO ENTRY'),
         SL: 'SL',
       }};
       return labels[raw] || raw.replaceAll('_', ' ');
     }}
     function tradeHealth(t) {{
       if (t.status !== 'FILLED') {{
-        return `<span class="health-pending">PENDING</span>`;
+        return `<span class="health-pending">${{tr('PENDING')}}</span>`;
       }}
       const entry = safeNum(t.entry);
       const sl = safeNum(t.sl);
@@ -755,7 +873,7 @@ class DashboardService:
       const last = safeNum(t.last_price);
       const nextTp = safeNum(t.next_tp);
       if (entry === null || sl === null || last === null || nextTp === null || entry === nextTp) {{
-        return `<span class="health-pending">LIVE</span>`;
+        return `<span class="health-pending">${{tr('LIVE')}}</span>`;
       }}
 
       let ratio;
@@ -947,23 +1065,23 @@ class DashboardService:
       const data = await res.json();
       const s = data.summary;
       document.getElementById('cards').innerHTML = [
-        card('Available Balance', fmt(s.available_balance), cls(s.available_balance)),
-        card('Wallet Balance', fmt(s.wallet_balance), cls(s.wallet_balance)),
-        card('Equity', fmt(s.equity), cls(s.equity)),
-        card('Open Trades', s.open_trades),
-        card('Closed Trades', s.closed_trades),
-        card('Winrate', `${{fmt(s.winrate)}}%`),
-        card('Non-Loss Rate', `${{fmt(s.non_loss_rate)}}%`),
-        card('Realized PnL', fmt(s.realized_pnl), cls(s.realized_pnl)),
-        card('Unrealized PnL', fmt(s.unrealized_pnl), cls(s.unrealized_pnl)),
-        card('Wins', s.wins),
-        card('Losses', s.losses),
-        card('TP hits', s.tp_hits_total),
-        card('SL hits', s.sl_hits_total),
+        card(tr('Available Balance'), fmt(s.available_balance), cls(s.available_balance)),
+        card(tr('Wallet Balance'), fmt(s.wallet_balance), cls(s.wallet_balance)),
+        card(tr('Equity'), fmt(s.equity), cls(s.equity)),
+        card(tr('Open Trades'), s.open_trades),
+        card(tr('Closed Trades'), s.closed_trades),
+        card(tr('Winrate'), `${{fmt(s.winrate)}}%`),
+        card(tr('Non-Loss Rate'), `${{fmt(s.non_loss_rate)}}%`),
+        card(tr('Realized PnL'), fmt(s.realized_pnl), cls(s.realized_pnl)),
+        card(tr('Unrealized PnL'), fmt(s.unrealized_pnl), cls(s.unrealized_pnl)),
+        card(tr('Wins'), s.wins),
+        card(tr('Losses'), s.losses),
+        card(tr('TP hits'), s.tp_hits_total),
+        card(tr('SL hits'), s.sl_hits_total),
       ].join('');
       setPnlTitle(s.unrealized_pnl);
-      document.getElementById('active-body').innerHTML = data.active_trades.map(activeRow).join('') || '<tr><td colspan="5">No active trades</td></tr>';
-      document.getElementById('closed-body').innerHTML = data.closed_trades.map(closedRow).join('') || '<tr><td colspan="5">No closed trades</td></tr>';
+      document.getElementById('active-body').innerHTML = data.active_trades.map(activeRow).join('') || `<tr><td colspan="5">${{tr('noActive')}}</td></tr>`;
+      document.getElementById('closed-body').innerHTML = data.closed_trades.map(closedRow).join('') || `<tr><td colspan="5">${{tr('noClosed')}}</td></tr>`;
       await refreshEquity();
     }}
     const rangeSelect = document.getElementById('range-select');
@@ -973,6 +1091,15 @@ class DashboardService:
         await refresh();
       }});
     }}
+    const langSelect = document.getElementById('lang-select');
+    if (langSelect) {{
+      langSelect.addEventListener('change', async () => {{
+        applyLanguage(langSelect.value || 'en');
+        await refresh();
+      }});
+    }}
+    applyEmbedMode();
+    applyLanguage(detectLanguage());
     initThemeToggle();
     applyDeviceMode();
     window.addEventListener('resize', applyDeviceMode);
@@ -990,7 +1117,9 @@ class DashboardService:
                 return
 
             def do_GET(self):
-                if self.path in ["/", "/index.html"]:
+                path_only = self.path.split("?", 1)[0]
+
+                if path_only in ["/", "/index.html"]:
                     body = service._html().encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -999,7 +1128,7 @@ class DashboardService:
                     self.wfile.write(body)
                     return
 
-                if self.path.startswith("/api/stats"):
+                if path_only.startswith("/api/stats"):
                     range_key = "all"
                     if "?" in self.path:
                         query = self.path.split("?", 1)[1]
@@ -1018,7 +1147,7 @@ class DashboardService:
                     self.wfile.write(payload)
                     return
 
-                if self.path.startswith("/api/equity"):
+                if path_only.startswith("/api/equity"):
                     range_key = "all"
                     if "?" in self.path:
                         query = self.path.split("?", 1)[1]
@@ -1037,7 +1166,7 @@ class DashboardService:
                     self.wfile.write(payload)
                     return
 
-                if self.path == "/health":
+                if path_only == "/health":
                     payload = b'{"ok":true}'
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json; charset=utf-8")
