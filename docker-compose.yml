@@ -1,0 +1,65 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile
+
+    image: ${SYSTEM_NAME:-tg-bybit-bot}:latest
+    container_name: ${SYSTEM_NAME:-tg-bybit-bot}
+    user: "${PUID:-1000}:${PGID:-1000}"
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./data:${DATA_DIR:-/opt/bot/data}
+
+    healthcheck:
+      test: ["CMD", "python", "-m", "classes.reporting.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    restart: unless-stopped
+
+    networks:
+      - default
+      - hub-shared
+
+  ui:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile
+
+    image: ${SYSTEM_NAME:-tg-bybit-bot}:latest
+    container_name: ${SYSTEM_NAME:-tg-bybit-bot}-ui
+    user: "${PUID:-1000}:${PGID:-1000}"
+
+    env_file:
+      - .env
+
+    environment:
+      UI_PROXY_TARGET: "http://bot:${DASHBOARD_PORT:-9988}"
+
+    command: ["python", "-m", "classes.reporting.ui_proxy"]
+
+    depends_on:
+      - bot
+
+    profiles:
+      - dashboard
+
+    ports:
+      - "${DASHBOARD_PORT:-9988}:${DASHBOARD_PORT:-9988}"
+
+    restart: unless-stopped
+
+    networks:
+      - default
+      - hub-shared
+
+networks:
+  hub-shared:
+    name: services-hub-shared
+    external: true

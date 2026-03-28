@@ -1,0 +1,4 @@
+pybit
+telethon
+python-dotenv
+pytz
