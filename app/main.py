@@ -2,7 +2,6 @@ import asyncio
 from classes.bybit_client.bybit_client import BybitClient
 from classes.config import DASHBOARD_ENABLED
 from classes.logging.logger import setup_logger, get_source_logger
-from classes.reporting.dashboard import DashboardService
 from classes.reporting.health_state import touch
 from classes.reporting.storage import Storage
 from classes.telegram.telegram_client import TelegramService
@@ -10,6 +9,7 @@ from classes.trade_manager.execution import ExecutionService
 from classes.trade_manager.order_watcher import OrderWatcher
 from classes.trade_manager.reconciliation import Reconciliation
 from classes.trade_manager.worker import Worker
+from classes.webui.dashboard_service import DashboardService
 
 
 async def main():

@@ -53,7 +53,6 @@ On first successful login the file will be created automatically.
 
 ### 3. Important `.env` variables
 
-- `SYSTEM_NAME` — Docker image/container name
 - `DATA_DIR` — container path for mounted local `./data`
 - `TZ` — timezone used in logs
 - `BRAND_NAME` — your visible project brand used in the dashboard title, footer, and browser tab label
