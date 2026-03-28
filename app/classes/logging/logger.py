@@ -2,7 +2,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from classes.config import DATA_REPORTS_DIR, TZ, LOG_TO_FILE, LOG_LEVEL, LOG_MAX_BYTES, LOG_BACKUP_COUNT
+from config import DATA_REPORTS_DIR, TZ, LOG_TO_FILE, LOG_LEVEL, LOG_MAX_BYTES, LOG_BACKUP_COUNT
 import pytz
 
 

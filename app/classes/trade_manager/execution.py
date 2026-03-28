@@ -1,4 +1,4 @@
-from classes.config import MAX_POSITION_MULTIPLIER, MAX_ENTRY_DEVIATION_PCT
+from config import MAX_POSITION_MULTIPLIER, MAX_ENTRY_DEVIATION_PCT
 
 
 class ExecutionService:

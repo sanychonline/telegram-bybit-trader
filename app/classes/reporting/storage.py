@@ -5,7 +5,7 @@ import threading
 from datetime import datetime
 from uuid import uuid4
 from pathlib import Path
-from classes.config import DATA_DIR, DATA_REPORTS_DIR, DATA_STORAGE_DIR
+from config import DATA_DIR, DATA_REPORTS_DIR, DATA_STORAGE_DIR
 
 
 class Storage:

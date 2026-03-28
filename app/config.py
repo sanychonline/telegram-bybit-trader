@@ -15,6 +15,7 @@ def get_env(name, default=None, required=False, cast=None):
 
     return value
 
+
 DATA_DIR = get_env("DATA_DIR", "/opt/bot/data")
 DATA_CACHES_DIR = f"{DATA_DIR}/caches"
 DATA_REPORTS_DIR = f"{DATA_DIR}/reports"

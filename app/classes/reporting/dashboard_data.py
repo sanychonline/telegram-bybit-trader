@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from classes.config import TZ
+from config import TZ
 
 
 class DashboardDataService:

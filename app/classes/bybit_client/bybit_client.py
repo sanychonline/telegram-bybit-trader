@@ -1,7 +1,7 @@
 import math
 from datetime import datetime, timezone
 from pybit.unified_trading import HTTP
-from classes.config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_TESTNET
+from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_TESTNET
 from classes.reporting.health_state import touch
 
 

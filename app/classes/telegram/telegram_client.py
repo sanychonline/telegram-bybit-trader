@@ -1,6 +1,6 @@
 import os
 import asyncio
-from classes.config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_CHAT_ID, DATA_STORAGE_DIR
+from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_CHAT_ID, DATA_STORAGE_DIR
 from classes.reporting.health_state import touch
 from classes.telegram.parser import classify_message
 from telethon import TelegramClient, events

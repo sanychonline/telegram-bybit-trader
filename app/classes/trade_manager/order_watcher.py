@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 from classes.trade_manager.close_reason import classify_close_reason
-from classes.config import (
+from config import (
     MAX_ENTRY_DEVIATION_PCT,
     MAX_SIGNAL_DESYNC_PCT,
     EMERGENCY_TP_PCT,

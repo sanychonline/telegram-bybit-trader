@@ -3,7 +3,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from classes.config import BRAND_NAME, DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_REFRESH_SEC
+from config import BRAND_NAME, DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_REFRESH_SEC
 from classes.reporting.dashboard_data import DashboardDataService
 from classes.webui.renderers.trader_dashboard import render_trader_dashboard_html
 

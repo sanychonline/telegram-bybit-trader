@@ -16,7 +16,7 @@ It is responsible for:
 - exposing an optional live dashboard for account and trade monitoring.
 
 Main entry point:
-- `app/main.py`
+- `app/start.py`
 
 Runtime data layout:
 - `data/caches` — rebuildable caches

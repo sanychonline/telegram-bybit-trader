@@ -3,7 +3,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from classes.config import DATA_STORAGE_DIR
+from config import DATA_STORAGE_DIR
 
 
 HEALTHCHECK_PATH = Path(DATA_STORAGE_DIR) / "healthcheck.json"
