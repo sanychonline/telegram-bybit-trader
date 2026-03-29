@@ -24,6 +24,7 @@ def build_trader_dashboard_js(refresh_ms):
     let lastSignalMetaHtml = '';
     const translations = {translations_json};
     const themeModes = ['auto', 'day', 'night'];
+    const autoThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const settingsGroups = {{
       general: ['tz', 'dashboard_refresh_sec'],
       bybit: ['bybit_testnet'],
@@ -174,8 +175,7 @@ def build_trader_dashboard_js(refresh_ms):
       return 'en';
     }}
     function detectAutoTheme() {{
-      const hour = new Date().getHours();
-      return hour >= 7 && hour < 20 ? 'day' : 'night';
+      return autoThemeQuery.matches ? 'night' : 'day';
     }}
     function themeIcon(mode) {{
       const text = getCssVar('--text', '#ebf3f9');
@@ -230,6 +230,7 @@ def build_trader_dashboard_js(refresh_ms):
           <circle cx="16.2" cy="15.2" r="4.9" fill="${{text}}"></circle>
           <circle cx="18.3" cy="13.3" r="4.2" fill="${{panel2}}"></circle>
           <circle cx="18.8" cy="17.4" r="1" fill="${{line}}"></circle>
+          <line x1="5" y1="5" x2="19" y2="19" stroke="${{line}}" stroke-width="1" stroke-linecap="round" opacity=".72"></line>
         </svg>
       `;
     }}
@@ -297,6 +298,14 @@ def build_trader_dashboard_js(refresh_ms):
       let mode = getCookie('ui_theme') || 'auto';
       if (!themeModes.includes(mode)) mode = 'auto';
       applyTheme(mode);
+      const syncAutoTheme = () => {{
+        if (mode === 'auto') applyTheme(mode);
+      }};
+      if (typeof autoThemeQuery.addEventListener === 'function') {{
+        autoThemeQuery.addEventListener('change', syncAutoTheme);
+      }} else if (typeof autoThemeQuery.addListener === 'function') {{
+        autoThemeQuery.addListener(syncAutoTheme);
+      }}
       window.addEventListener('message', (event) => {{
         if (event.origin !== window.location.origin) return;
         const data = event.data || {{}};
