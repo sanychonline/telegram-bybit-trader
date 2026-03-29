@@ -30,3 +30,8 @@ What to do with it:
 - treat session files and runtime data as private;
 - back up only if you need to preserve local bot state;
 - deleting these files may reset local context or require Telegram re-login.
+
+Git hygiene:
+- `data/*` is ignored by the repository except for this README;
+- do not add `history.sqlite3`, `secrets.key`, `*.session`, or logs to commits;
+- if you need to export state, do it outside the repository tree.

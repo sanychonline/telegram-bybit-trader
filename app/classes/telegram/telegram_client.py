@@ -133,19 +133,6 @@ class TelegramService:
         for message in reversed(backlog_messages):
             await self._process_message(message, source="telegram_backfill")
 
-        async for message in self.client.iter_messages(self.chat_id, limit=100):
-            text = message.text or ""
-            signal = parse_signal(text)
-            if not signal:
-                continue
-            self.worker.storage.record_signal_event({
-                "message_id": getattr(message, "id", None),
-                "symbol": signal.get("symbol"),
-                "side": signal.get("side"),
-                "source": "telegram_history_sync",
-                "created_at": message.date.isoformat() if getattr(message, "date", None) else None,
-            })
-
         touch("telegram")
         self.logger.info("Telegram client started")
         self.logger.debug(

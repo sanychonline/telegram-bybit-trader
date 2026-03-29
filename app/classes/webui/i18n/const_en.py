@@ -27,6 +27,8 @@ TRANSLATIONS = {
     "Closed Trades": "Closed Trades",
     "Balance History": "Balance History",
     "Loading balance history...": "Loading balance history...",
+    "Last Signal": "Last Signal",
+    "No signals yet": "No signals yet",
     "Exchange history sync in progress...": "Exchange history sync in progress...",
     "Showing local data until exchange sync completes.": "Showing local data until exchange sync completes.",
     "Closed trades and stats are loaded from exchange history.": "Closed trades and stats are loaded from exchange history.",

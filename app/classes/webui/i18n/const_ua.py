@@ -27,6 +27,8 @@ TRANSLATIONS = {
     "Closed Trades": "Закриті угоди",
     "Balance History": "Історія балансу",
     "Loading balance history...": "Завантаження історії балансу...",
+    "Last Signal": "Останній сигнал",
+    "No signals yet": "Ще немає сигналів",
     "Exchange history sync in progress...": "Триває синхронізація історії з біржі...",
     "Showing local data until exchange sync completes.": "Показано локальні дані, доки не завершиться синхронізація з біржею.",
     "Closed trades and stats are loaded from exchange history.": "Закриті угоди та статистика завантажені з біржової історії.",

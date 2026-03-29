@@ -56,6 +56,127 @@ TRADER_DASHBOARD_CSS = r"""
       gap: 12px;
       margin-bottom: 18px;
     }
+    .signal-meta {
+      margin: -8px 0 16px;
+      width: 100vw;
+      margin-left: calc(50% - 50vw);
+      margin-right: calc(50% - 50vw);
+      border: 1px solid var(--line);
+      border-left: 0;
+      border-right: 0;
+      border-radius: 0;
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      overflow: hidden;
+      position: relative;
+      box-shadow: var(--panel-shadow);
+    }
+    .signal-meta-empty {
+      display: block;
+      padding: 10px 14px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .signal-marquee {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      overflow: hidden;
+      white-space: nowrap;
+      position: relative;
+    }
+    .signal-marquee::before,
+    .signal-marquee::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 36px;
+      z-index: 1;
+      pointer-events: none;
+    }
+    .signal-marquee::before {
+      left: 0;
+      background: linear-gradient(90deg, var(--panel) 0%, rgba(0,0,0,0) 100%);
+    }
+    .signal-marquee::after {
+      right: 0;
+      background: linear-gradient(270deg, var(--panel) 0%, rgba(0,0,0,0) 100%);
+    }
+    .signal-marquee-track {
+      display: flex;
+      align-items: center;
+      gap: 36px;
+      width: max-content;
+      padding: 10px 14px;
+      animation: signal-marquee 22s linear infinite;
+      will-change: transform;
+    }
+    .signal-marquee:hover .signal-marquee-track {
+      animation-play-state: paused;
+    }
+    .signal-marquee-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      flex: 0 0 auto;
+      width: max-content;
+      padding-right: 36px;
+    }
+    .signal-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding-right: 18px;
+    }
+    .signal-sep {
+      color: var(--muted);
+      opacity: 0.75;
+      padding: 0 10px;
+      font-weight: 600;
+    }
+    .signal-sep-outer {
+      color: color-mix(in srgb, var(--muted) 80%, var(--text));
+    }
+    .signal-arrow {
+      font-weight: 700;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .signal-arrow-up {
+      color: var(--green);
+    }
+    .signal-arrow-down {
+      color: var(--red);
+    }
+    .signal-result {
+      font-size: 14px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+    }
+    .signal-emoji {
+      font-size: 14px;
+      line-height: 1;
+    }
+    .signal-time {
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .signal-pair {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    @keyframes signal-marquee {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
     h1 { margin: 0 0 6px; font-size: 28px; }
     .sub { color: var(--muted); }
     .icon-toggle, .settings-toggle {

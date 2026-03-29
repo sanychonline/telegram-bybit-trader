@@ -27,6 +27,8 @@ TRANSLATIONS = {
     "Closed Trades": "Trades clôturés",
     "Balance History": "Historique du solde",
     "Loading balance history...": "Chargement de l'historique du solde...",
+    "Last Signal": "Dernier signal",
+    "No signals yet": "Aucun signal pour le moment",
     "Exchange history sync in progress...": "La synchronisation de l'historique de l'exchange est en cours...",
     "Showing local data until exchange sync completes.": "Les données locales sont affichées jusqu'à la fin de la synchronisation avec l'exchange.",
     "Closed trades and stats are loaded from exchange history.": "Les trades clôturés et les statistiques sont chargés depuis l'historique de l'exchange.",

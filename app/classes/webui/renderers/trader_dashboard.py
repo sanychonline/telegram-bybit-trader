@@ -50,6 +50,7 @@ def render_trader_dashboard_html(refresh_ms):
         </select>
       </div>
     </div>
+    <div class="signal-meta" id="signal-meta"></div>
     <div class="exchange-status" id="exchange-status"></div>
     <div class="settings-modal" id="settings-modal" hidden>
       <div class="settings-backdrop" id="settings-backdrop"></div>

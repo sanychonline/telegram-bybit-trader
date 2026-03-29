@@ -267,11 +267,48 @@ class DashboardDataService:
         active_rows.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
         return realized_total, unrealized_total, active_rows
 
+    def _signal_direction_arrow(self, signal, active_trade=None):
+        if not active_trade:
+            return None
+
+        side = str(signal.get("side") or "").upper()
+        try:
+            entry = float(active_trade.get("entry", 0) or 0)
+            last_price = float(active_trade.get("last_price", 0) or 0)
+        except Exception:
+            return None
+
+        if entry <= 0 or last_price <= 0:
+            return None
+
+        if side == "LONG":
+            return "▲" if last_price >= entry else "▼"
+        if side == "SHORT":
+            return "▲" if last_price <= entry else "▼"
+        return None
+
+    def _signal_result_emoji(self, trade=None):
+        if not trade:
+            return None
+
+        try:
+            pnl = float(trade.get("pnl", 0) or 0)
+        except Exception:
+            return None
+
+        if pnl > 0:
+            return "👍"
+        if pnl < 0:
+            return "😢"
+        return "😐"
+
     def build_stats(self, range_key="all"):
         exchange_closed = self.storage.get_exchange_closed_trades(source="exchange_closed_pnl")
         filtered_exchange_closed = self._filter_exchange_closed_trades(exchange_closed, range_key)
         signal_events = self.storage.get_signal_events()
         filtered_signal_events = self._filter_signal_events(signal_events, range_key)
+        last_signal = filtered_signal_events[0] if filtered_signal_events else (signal_events[0] if signal_events else None)
+        recent_signals = signal_events[:10]
         local_trades = self.storage.get_all_trades()
         filtered_local_trades = self._filter_local_trades(local_trades, range_key)
         sync_meta = self.storage.get_named_sync_state("closed_pnl_history")
@@ -279,6 +316,28 @@ class DashboardDataService:
         wins, losses, breakevens, _, closed_rows = self._closed_summary_exchange(filtered_exchange_closed)
         closed_source_name = "exchange"
         active_realized_total, unrealized_total, active_rows = self._active_summary()
+        active_trade_map = {
+            f"{row.get('symbol')}|{row.get('side')}": row
+            for row in active_rows
+            if row.get("symbol") and row.get("side")
+        }
+        all_trades = self.storage.get_all_trades()
+        closed_trade_by_message_id = {}
+        closed_trade_by_symbol_side = {}
+        for trade in reversed(all_trades):
+            if not isinstance(trade, dict):
+                continue
+            if trade.get("status") != "CLOSED":
+                continue
+            message_id = str(trade.get("message_id") or "").strip()
+            symbol = trade.get("symbol")
+            side = trade.get("side")
+            if message_id and message_id not in closed_trade_by_message_id:
+                closed_trade_by_message_id[message_id] = trade
+            if symbol and side:
+                key = f"{symbol}|{side}"
+                if key not in closed_trade_by_symbol_side:
+                    closed_trade_by_symbol_side[key] = trade
         account = self.bybit.get_account_summary()
         closed_source = filtered_exchange_closed
         tp_hits_total = sum(int(trade.get("tp_hits", 0) or 0) for trade in closed_source)
@@ -317,6 +376,27 @@ class DashboardDataService:
                 "range": range_key,
                 "total_trades": len(closed_source) + len(active_rows),
                 "suggested_trades": len(filtered_signal_events),
+                "last_signal_at": last_signal.get("created_at") if last_signal else None,
+                "last_signal_symbol": last_signal.get("symbol") if last_signal else None,
+                "last_signal_side": last_signal.get("side") if last_signal else None,
+                "last_signal_source": last_signal.get("source") if last_signal else None,
+                "recent_signals": [
+                    {
+                        "message_id": event.get("message_id"),
+                        "created_at": event.get("created_at"),
+                        "symbol": event.get("symbol"),
+                        "side": event.get("side"),
+                        "direction_arrow": self._signal_direction_arrow(
+                            event,
+                            active_trade_map.get(f"{event.get('symbol')}|{event.get('side')}"),
+                        ),
+                        "result_emoji": self._signal_result_emoji(
+                            closed_trade_by_message_id.get(str(event.get("message_id") or "").strip())
+                            or closed_trade_by_symbol_side.get(f"{event.get('symbol')}|{event.get('side')}")
+                        ),
+                    }
+                    for event in recent_signals
+                ],
                 "accepted_trades": accepted_trades,
                 "rejected_trades": rejected_trades,
                 "open_trades": len(active_rows),

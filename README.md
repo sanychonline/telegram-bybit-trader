@@ -115,6 +115,14 @@ Bot-local only:
 - trade execution flow
 - local reconciliation and enrichment context
 
+The dashboard also includes a live signal ticker:
+- shows the last 10 signals from the local signal event log
+- displays only the time, not the date
+- uses `🟢` / `🔴` for LONG / SHORT
+- shows `👍` if the related trade closed in profit
+- shows `😢` if the related trade closed in loss
+- keeps the ticker moving right-to-left in a continuous loop
+
 ## Data Directory Guide
 
 `data`
@@ -157,3 +165,4 @@ It validates recent heartbeats from:
 - Start with Bybit testnet enabled in the dashboard settings if you are validating a new setup.
 - The dashboard may briefly show sync-in-progress states while exchange history is being backfilled.
 - Legacy JSON files can be imported once during migration, but the live app now persists runtime state in SQLite.
+- Runtime secrets, sessions, logs, and SQLite files are ignored by git and should stay out of commits.

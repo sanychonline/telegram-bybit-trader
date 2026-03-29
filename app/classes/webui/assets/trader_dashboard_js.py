@@ -20,6 +20,7 @@ def build_trader_dashboard_js(refresh_ms):
     let exchangeStatusTimer = null;
     let lastExchangeStatusKey = '';
     let settingsPayload = null;
+    let lastSignalSummary = null;
     const translations = {translations_json};
     const themeModes = ['auto', 'day', 'night'];
     const settingsGroups = {{
@@ -86,6 +87,53 @@ def build_trader_dashboard_js(refresh_ms):
     function displayStat(value, formatter=null) {{
       if (value === null || value === undefined || value === '') return '—';
       return formatter ? formatter(value) : value;
+    }}
+    function formatClock(value) {{
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value).replace('T', ' ').split('.')[0];
+      return date.toLocaleTimeString([], {{
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }});
+    }}
+    function formatSignalMeta(summary) {{
+      const signals = Array.isArray(summary?.recent_signals) ? summary.recent_signals : [];
+      if (!signals.length) {{
+        return `<span class="signal-meta-empty">${{tr('Last Signal')}}: ${{tr('No signals yet')}}</span>`;
+      }}
+
+      const content = signals.map((signal) => {{
+        const side = String(signal.side || '').toUpperCase();
+        const emoji = side === 'LONG' ? '🟢' : side === 'SHORT' ? '🔴' : '⚪';
+        const when = formatClock(signal.created_at);
+        const pair = [signal.symbol, side].filter(Boolean).join(' ');
+        const marker = signal.result_emoji
+          ? `<span class="signal-result">${{signal.result_emoji}}</span>`
+          : signal.direction_arrow === '▲'
+            ? '<span class="signal-arrow signal-arrow-up">▲</span>'
+            : signal.direction_arrow === '▼'
+              ? '<span class="signal-arrow signal-arrow-down">▼</span>'
+              : '';
+        return `
+          <span class="signal-chip">
+            <span class="signal-emoji">${{emoji}}</span>
+            <span class="signal-time">${{when}}</span>
+            ${{marker ? `<span class="signal-sep">${{marker}}</span>` : ''}}
+            <span class="signal-pair">${{pair}}</span>
+          </span>
+        `;
+      }}).join('<span class="signal-sep signal-sep-outer">|</span>');
+
+      return `
+        <div class="signal-marquee" aria-label="${{tr('Last Signal')}}">
+          <div class="signal-marquee-track">
+            <div class="signal-marquee-item">${{content}}</div>
+            <div class="signal-marquee-item" aria-hidden="true">${{content}}</div>
+          </div>
+        </div>
+      `;
     }}
     function setPnlTitle(value) {{
       const pnl = Number(value || 0);
@@ -218,6 +266,8 @@ def build_trader_dashboard_js(refresh_ms):
       if (panelTitles[1]) panelTitles[1].textContent = tr('Closed Trades');
       if (panelTitles[2]) panelTitles[2].textContent = tr('Balance History');
       document.getElementById('equity-caption').textContent = tr('Loading balance history...');
+      const signalMeta = document.getElementById('signal-meta');
+      if (signalMeta) signalMeta.innerHTML = formatSignalMeta(lastSignalSummary);
       document.querySelectorAll('th').forEach(th => {{
         th.textContent = tr(th.textContent.trim());
       }});
@@ -723,6 +773,9 @@ def build_trader_dashboard_js(refresh_ms):
       const res = await fetch(`api/stats?range=${{currentRange}}`, {{ cache: 'no-store' }});
       const data = await res.json();
       const s = data.summary;
+      lastSignalSummary = s;
+      const signalMeta = document.getElementById('signal-meta');
+      if (signalMeta) signalMeta.innerHTML = formatSignalMeta(s);
       renderExchangeStatus(s);
       const performanceCards = [
         card(tr('Profit PnL'), displayStat(s.profit_pnl, fmt), cls(s.profit_pnl)),
