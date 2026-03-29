@@ -12,6 +12,7 @@ Typical files:
 
 What goes here:
 - SQLite storage for local bot trade state, balance snapshots, signal events, exchange sync history, runtime settings, and encrypted secrets;
+- Telegram message registry and history sync metadata used for startup backfill and cleanup;
 - local encryption key for app secrets;
 - healthcheck timestamps;
 - Telethon session files;
@@ -21,6 +22,7 @@ What goes here:
 Important note:
 - dashboard balances, active trades, closed trades, and performance metrics are exchange-first;
 - SQLite is the primary local storage layer for runtime flow and enrichment.
+- Telegram startup sync is two-layered: first we track known message IDs, then we backfill only missing messages.
 
 What to do with it:
 - keep it out of git;
@@ -31,4 +33,5 @@ What to do with it:
 Git hygiene:
 - `data/*` is ignored by the repository except for this README;
 - do not add `traderbot.sqlite3`, `secrets.key`, `*.session`, or logs to commits;
+- do not add Telegram registry exports or sync artifacts to commits;
 - if you need to export state, do it outside the repository tree.

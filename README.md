@@ -18,12 +18,16 @@ The project now has a clear split:
 
 Local storage is still used for:
 - Telegram session state
+- Telegram message registry and history sync metadata
 - runtime bot state
 - execution/order enrichment
 - healthchecks and logs
 - encrypted app secrets
 
 It is no longer treated as the source of truth for portfolio history or closed-trade statistics.
+Telegram history sync now uses a two-layer approach:
+- first it inventories known Telegram message IDs into SQLite;
+- then it backfills only the missing messages on startup.
 
 ## Services
 
@@ -125,11 +129,19 @@ The dashboard also includes a live signal ticker:
 
 The dashboard theme toggle follows the system `prefers-color-scheme` setting in real time when `auto` is selected.
 
+The Telegram sync state is tracked in SQLite too:
+- `telegram.history_sync.status`
+- `telegram.history_sync.started_at`
+- `telegram.history_sync.finished_at`
+- `telegram.history_sync.synced_count`
+- `telegram.history_sync.processed_count`
+
 ## Data Directory Guide
 
 `data`
 - `traderbot.sqlite3`
   - primary local storage for bot trades, signal events, exchange sync history, balance snapshots, runtime settings, and encrypted secrets metadata
+  - includes `telegram_message_registry` and `sync_state` metadata for Telegram history sync
 - `secrets.key`
   - local encryption key for app secrets stored in SQLite
 - `healthcheck.json`
