@@ -3,10 +3,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from config import DATA_STORAGE_DIR
+from config import DATA_HEALTHCHECK_PATH
 
-
-HEALTHCHECK_PATH = Path(DATA_STORAGE_DIR) / "healthcheck.json"
+HEALTHCHECK_PATH = Path(DATA_HEALTHCHECK_PATH)
 MAX_APP_AGE_SECONDS = 30
 MAX_TELEGRAM_AGE_SECONDS = 90
 MAX_BYBIT_AGE_SECONDS = 90
@@ -40,7 +39,8 @@ def main():
         sys.exit(1)
 
     _ensure_fresh(payload, "updated_at", MAX_APP_AGE_SECONDS)
-    _ensure_fresh(payload, "telegram_alive_at", MAX_TELEGRAM_AGE_SECONDS)
+    if payload.get("telegram_enabled", True):
+        _ensure_fresh(payload, "telegram_alive_at", MAX_TELEGRAM_AGE_SECONDS)
     _ensure_fresh(payload, "bybit_alive_at", MAX_BYBIT_AGE_SECONDS)
     _ensure_fresh(payload, "watcher_alive_at", MAX_WATCHER_AGE_SECONDS)
     _ensure_fresh(payload, "reconciliation_alive_at", MAX_RECONCILIATION_AGE_SECONDS)

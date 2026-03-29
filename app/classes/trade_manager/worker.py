@@ -35,7 +35,9 @@ class Worker:
                 f"message classified | source={source} | message_id={getattr(message, 'id', None)} | type=signal | "
                 f"symbol={signal['symbol']} side={signal['side']} entry={signal['entry']}"
             )
-            await asyncio.to_thread(self.handle_signal, signal, message.id, source)
+            created_at = getattr(message, "date", None)
+            created_at_iso = created_at.isoformat() if created_at is not None else None
+            await asyncio.to_thread(self.handle_signal, signal, message.id, source, created_at_iso)
             return
 
         tp_event = parse_tp_hit(text)
@@ -51,7 +53,7 @@ class Worker:
             f"message classified | source={source} | message_id={getattr(message, 'id', None)} | type=ignored"
         )
 
-    def handle_signal(self, signal, message_id, source="telegram"):
+    def handle_signal(self, signal, message_id, source="telegram", created_at=None):
         symbol = signal["symbol"]
 
         self.storage.record_signal_event({
@@ -59,6 +61,7 @@ class Worker:
             "symbol": signal.get("symbol"),
             "side": signal.get("side"),
             "source": source,
+            "created_at": created_at,
         })
 
         with self._message_lock:

@@ -3,24 +3,65 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from config import BRAND_NAME, DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_REFRESH_SEC, DISCLAIMER_TEXT
+from config import (
+    DASHBOARD_HOST,
+    DASHBOARD_PORT,
+    DASHBOARD_REFRESH_SEC,
+)
 from classes.reporting.dashboard_data import DashboardDataService
+from classes.reporting.storage import APP_SETTINGS_SCHEMA, APP_SECRETS_SCHEMA
 from classes.webui.renderers.trader_dashboard import render_trader_dashboard_html
 
 
 class DashboardService:
     def __init__(self, bybit, storage, logger):
         self.logger = logger
+        self.storage = storage
         self.host = DASHBOARD_HOST
         self.port = DASHBOARD_PORT
-        self.refresh_sec = max(2, DASHBOARD_REFRESH_SEC)
         self.data = DashboardDataService(bybit, storage)
         self._server = None
         self._thread = None
 
     def _html(self):
-        refresh_ms = self.refresh_sec * 1000
-        return render_trader_dashboard_html(BRAND_NAME, refresh_ms, DISCLAIMER_TEXT)
+        refresh_sec = max(2, int(self.storage.get_app_setting("dashboard_refresh_sec", DASHBOARD_REFRESH_SEC)))
+        refresh_ms = refresh_sec * 1000
+        return render_trader_dashboard_html(refresh_ms)
+
+    def _mask_secret(self, value):
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if len(text) <= 6:
+            return "*" * len(text)
+        return f"{text[:3]}***{text[-2:]}"
+
+    def _settings_payload(self):
+        values = self.storage.get_app_settings()
+        secrets_meta = self.storage.get_app_secrets_meta()
+        settings = {
+            key: values.get(key, {}).get("value", schema["default"])
+            for key, schema in APP_SETTINGS_SCHEMA.items()
+        }
+        return {
+            "settings": settings,
+            "schema": {
+                key: {"type": schema["type"]}
+                for key, schema in APP_SETTINGS_SCHEMA.items()
+            },
+            "secrets": {
+                key: {
+                    "configured": bool(meta.get("configured")),
+                    "masked": "Saved" if meta.get("configured") else "",
+                    "source": meta.get("source") or "missing",
+                }
+                for key, meta in secrets_meta.items()
+            },
+            "secret_schema": {
+                key: {"type": schema["type"]}
+                for key, schema in APP_SECRETS_SCHEMA.items()
+            },
+        }
 
     def _make_handler(self):
         service = self
@@ -79,6 +120,16 @@ class DashboardService:
                     self.wfile.write(payload)
                     return
 
+                if path_only == "/api/settings":
+                    payload = json.dumps(service._settings_payload()).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+
                 if path_only == "/health":
                     payload = b'{"ok":true}'
                     self.send_response(200)
@@ -90,6 +141,52 @@ class DashboardService:
 
                 self.send_response(404)
                 self.end_headers()
+
+            def do_POST(self):
+                path_only = self.path.split("?", 1)[0]
+                if path_only != "/api/settings":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                try:
+                    length = int(self.headers.get("Content-Length", "0") or 0)
+                except Exception:
+                    length = 0
+
+                try:
+                    raw = self.rfile.read(length) if length > 0 else b"{}"
+                    payload = json.loads(raw.decode("utf-8") or "{}")
+                except Exception:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+
+                try:
+                    updates = service.storage.update_app_settings(payload.get("settings") or {})
+                    updated_secrets = service.storage.update_app_secrets(payload.get("secrets") or {})
+                    response = json.dumps({
+                        "ok": True,
+                        "updated": updates,
+                        "updated_secrets": list(updated_secrets.keys()),
+                        "settings": service._settings_payload()["settings"],
+                    }).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(response)))
+                    self.end_headers()
+                    self.wfile.write(response)
+                except Exception as exc:
+                    response = json.dumps({
+                        "ok": False,
+                        "error": str(exc),
+                    }).encode("utf-8")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Content-Length", str(len(response)))
+                    self.end_headers()
+                    self.wfile.write(response)
 
         return Handler
 

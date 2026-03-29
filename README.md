@@ -20,7 +20,8 @@ Local storage is still used for:
 - Telegram session state
 - runtime bot state
 - execution/order enrichment
-- dashboard sync caches
+- healthchecks and logs
+- encrypted app secrets
 
 It is no longer treated as the source of truth for portfolio history or closed-trade statistics.
 
@@ -47,9 +48,7 @@ Core modules:
 - `app/classes/reporting/storage.py`
 
 Runtime data:
-- `data/reports`
-- `data/storage`
-- `data/caches`
+- `data`
 
 ## Quick Start
 
@@ -59,27 +58,33 @@ Runtime data:
 cp .env.default .env
 ```
 
-2. Fill required secrets:
-- `BYBIT_API_KEY`
-- `BYBIT_API_SECRET`
-- `BYBIT_TESTNET`
-- `TELEGRAM_API_ID`
-- `TELEGRAM_API_HASH`
-- `TELEGRAM_CHAT_ID`
+2. Keep only bootstrap settings in `.env`
+- `DATA_DIR`
+- `TZ`
+- logging settings such as `LOG_LEVEL`
 
-3. Start the stack:
+3. Start the stack once:
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Watch the bot:
+4. Open the dashboard settings and fill integrations there:
+- Bybit API key / secret
+- Bybit testnet toggle
+- Telegram API id / hash
+- Telegram chat id
+- execution and dashboard settings
+
+All runtime settings are stored in SQLite. Secrets are stored encrypted in the DB, with a local encryption key file in `data/secrets.key`.
+
+5. Watch the bot:
 
 ```bash
 docker compose logs -f bot
 ```
 
-5. Open the dashboard:
+6. Open the dashboard:
 
 ```text
 http://<host>:1002/
@@ -92,7 +97,7 @@ The dashboard is intentionally exchange-driven.
 Exchange-sourced:
 - balances
 - equity
-- balance curve
+- balance history
 - active trades
 - closed trades
 - wins / losses / breakevens
@@ -112,28 +117,25 @@ Bot-local only:
 
 ## Data Directory Guide
 
-`data/storage`
-- `trades.json`
-  - local runtime trade state used by the bot
-- `transaction_history.json`
-  - imported Bybit transaction history used for balance history reconstruction
-- `balance_history.json`
-  - local balance/equity snapshots
+`data`
 - `history.sqlite3`
-  - exchange history cache for dashboard analytics
+  - primary local storage for bot trades, signal events, exchange sync history, balance snapshots, runtime settings, and encrypted secrets metadata
+- `trades.json`
+  - legacy-compatible trade state snapshot used by the storage layer
+- `balance_history.json`
+  - exchange-backed balance history exported for the dashboard
+- `transaction_history.json`
+  - exchange-backed transaction history exported for the dashboard
+- `secrets.key`
+  - local encryption key for app secrets stored in SQLite
 - `healthcheck.json`
   - liveness state for container healthchecks
 - `session.session`
   - Telegram session
-
-`data/reports`
+- `session.session-journal`
+  - Telethon session journal
 - `bot.log`
   - runtime logs
-- `report.csv`
-  - local execution report; useful for debugging, but not the dashboard source of truth
-
-`data/caches`
-- rebuildable caches and temporary historical artifacts
 
 ## Healthchecks
 
@@ -152,6 +154,6 @@ It validates recent heartbeats from:
 
 ## Notes
 
-- Start with `BYBIT_TESTNET=true` if you are validating a new setup.
+- Start with Bybit testnet enabled in the dashboard settings if you are validating a new setup.
 - The dashboard may briefly show sync-in-progress states while exchange history is being backfilled.
-- Runtime JSON files are still useful operationally, but portfolio truth for the UI now comes from Bybit.
+- Legacy JSON files can be imported once during migration, but the live app now persists runtime state in SQLite.

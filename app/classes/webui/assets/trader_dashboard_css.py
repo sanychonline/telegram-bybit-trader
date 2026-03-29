@@ -68,6 +68,24 @@ TRADER_DASHBOARD_CSS = r"""
       cursor: pointer;
       white-space: nowrap;
     }
+    .theme-toggle.primary {
+      background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+      border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+    }
+    .settings-toggle {
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      color: var(--text);
+      border-radius: 999px;
+      width: 42px;
+      height: 42px;
+      font: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
     .controls {
       display: flex;
       align-items: center;
@@ -140,6 +158,121 @@ TRADER_DASHBOARD_CSS = r"""
     }
     .exchange-status.syncing {
       color: var(--amber);
+    }
+    .settings-modal[hidden] { display: none; }
+    .settings-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+    }
+    .settings-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(2, 8, 14, 0.55);
+      backdrop-filter: blur(4px);
+    }
+    .settings-panel {
+      position: relative;
+      width: min(920px, calc(100vw - 28px));
+      max-height: calc(100vh - 28px);
+      margin: 14px auto;
+      overflow: auto;
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--panel-shadow);
+    }
+    .settings-header, .settings-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+    }
+    .settings-footer {
+      border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+      border-bottom: 0;
+    }
+    .settings-header h3, .settings-section h4 {
+      margin: 0;
+    }
+    .settings-body {
+      padding: 18px;
+      display: grid;
+      gap: 18px;
+    }
+    .settings-section {
+      display: grid;
+      gap: 12px;
+    }
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      align-items: start;
+    }
+    .settings-field {
+      display: grid;
+      gap: 8px;
+      grid-template-rows: auto minmax(44px, auto) minmax(16px, auto);
+      align-content: start;
+    }
+    .settings-field label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .settings-field input,
+    .settings-field textarea,
+    .settings-field select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      color: var(--text);
+      font: inherit;
+      padding: 10px 12px;
+      min-height: 44px;
+    }
+    .settings-field textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+    .settings-readonly {
+      display: flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: var(--text);
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      min-height: 44px;
+    }
+    .settings-hint {
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 16px;
+    }
+    .settings-close {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      border-radius: 999px;
+      width: 36px;
+      height: 36px;
+      font-size: 20px;
+      cursor: pointer;
+    }
+    .settings-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .settings-note {
+      color: var(--muted);
+      font-size: 12px;
     }
     .card, .panel {
       background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
@@ -311,20 +444,6 @@ TRADER_DASHBOARD_CSS = r"""
       color: var(--muted);
       font-size: 12px;
       margin-top: 10px;
-    }
-    .footer {
-      margin-top: 16px;
-      color: var(--muted);
-      font-size: 12px;
-      text-align: center;
-    }
-    .footer-brand {
-      font-size: 12px;
-    }
-    .footer-note {
-      margin-top: 6px;
-      font-size: 11px;
-      opacity: 0.9;
     }
     body.mobile .wrap { padding: 14px; }
     body.mobile .topbar {

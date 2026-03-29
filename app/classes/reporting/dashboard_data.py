@@ -8,7 +8,13 @@ class DashboardDataService:
     def __init__(self, bybit, storage):
         self.bybit = bybit
         self.storage = storage
-        self.local_tz = ZoneInfo(TZ)
+
+    @property
+    def local_tz(self):
+        try:
+            return ZoneInfo(self.storage.get_app_setting("tz", TZ))
+        except Exception:
+            return ZoneInfo(TZ)
 
     def _closed_summary_exchange(self, trades):
         wins = 0
@@ -122,6 +128,32 @@ class DashboardDataService:
             if end is not None and dt >= end:
                 continue
             filtered.append(event)
+        return filtered
+
+    def _filter_local_trades(self, trades, range_key):
+        start, end = self._range_bounds(range_key)
+        if start is None and end is None:
+            return list(trades)
+
+        filtered = []
+        for trade in trades:
+            raw = trade.get("created_at") or trade.get("updated_at")
+            if not raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                dt = dt.astimezone(self.local_tz)
+            except Exception:
+                continue
+            if start is not None and dt < start:
+                continue
+            if end is not None and dt >= end:
+                continue
+            filtered.append(trade)
         return filtered
 
     def _active_summary(self):
@@ -240,6 +272,8 @@ class DashboardDataService:
         filtered_exchange_closed = self._filter_exchange_closed_trades(exchange_closed, range_key)
         signal_events = self.storage.get_signal_events()
         filtered_signal_events = self._filter_signal_events(signal_events, range_key)
+        local_trades = self.storage.get_all_trades()
+        filtered_local_trades = self._filter_local_trades(local_trades, range_key)
         sync_meta = self.storage.get_named_sync_state("closed_pnl_history")
         sync_in_progress = bool(sync_meta) and not bool(sync_meta.get("full_sync_completed"))
         wins, losses, breakevens, _, closed_rows = self._closed_summary_exchange(filtered_exchange_closed)
@@ -265,20 +299,13 @@ class DashboardDataService:
 
         resolved = wins + losses
         winrate = (wins / resolved * 100) if resolved else 0.0
-        accepted_trades = 0
+        accepted_trades = len(filtered_local_trades)
         rejected_trades = 0
 
         for event in filtered_signal_events:
             status = str(event.get("status") or "").strip().lower()
-            message_id = event.get("message_id")
-            if status == "accepted":
-                accepted_trades += 1
-                continue
             if status == "rejected":
                 rejected_trades += 1
-                continue
-            if message_id not in (None, ""):
-                accepted_trades += 1
 
         return {
             "summary": {

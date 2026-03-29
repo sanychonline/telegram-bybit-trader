@@ -2,10 +2,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import DATA_STORAGE_DIR
+from config import DATA_HEALTHCHECK_PATH
 
-
-HEALTHCHECK_PATH = Path(DATA_STORAGE_DIR) / "healthcheck.json"
+HEALTHCHECK_PATH = Path(DATA_HEALTHCHECK_PATH)
 
 
 def touch(component, **extra):

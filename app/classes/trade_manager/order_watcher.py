@@ -20,6 +20,18 @@ class OrderWatcher:
         self.storage = storage
         self.logger = logger
 
+    def _max_entry_deviation_pct(self):
+        return float(self.storage.get_app_setting("max_entry_deviation_pct", MAX_ENTRY_DEVIATION_PCT))
+
+    def _max_signal_desync_pct(self):
+        return float(self.storage.get_app_setting("max_signal_desync_pct", MAX_SIGNAL_DESYNC_PCT))
+
+    def _emergency_tp_pct(self):
+        return float(self.storage.get_app_setting("emergency_tp_pct", EMERGENCY_TP_PCT))
+
+    def _pending_entry_timeout_sec(self):
+        return int(self.storage.get_app_setting("pending_entry_timeout_sec", PENDING_ENTRY_TIMEOUT_SEC))
+
     async def watch(self):
         while True:
             try:
@@ -105,7 +117,7 @@ class OrderWatcher:
         if (
             current_size <= 0
             and pending_age_sec is not None
-            and pending_age_sec >= PENDING_ENTRY_TIMEOUT_SEC
+            and pending_age_sec >= self._pending_entry_timeout_sec()
         ):
             if order_id and order_status in ["New", "PartiallyFilled", "Untriggered", None]:
                 try:
@@ -131,10 +143,10 @@ class OrderWatcher:
         if market_price and entry > 0:
             if side == "LONG":
                 deviation = (market_price - entry) / entry
-                favorable_move = market_price > entry and deviation >= MAX_ENTRY_DEVIATION_PCT
+                favorable_move = market_price > entry and deviation >= self._max_entry_deviation_pct()
             else:
                 deviation = (entry - market_price) / entry
-                favorable_move = market_price < entry and deviation >= MAX_ENTRY_DEVIATION_PCT
+                favorable_move = market_price < entry and deviation >= self._max_entry_deviation_pct()
 
             if favorable_move and current_size <= 0:
                 if order_id:
@@ -741,10 +753,10 @@ class OrderWatcher:
 
         if side == "LONG":
             tp_base = max(reference_price, last_price) if last_price > 0 else reference_price
-            return self.bybit.normalize_price(symbol, tp_base * (1 + EMERGENCY_TP_PCT))
+            return self.bybit.normalize_price(symbol, tp_base * (1 + self._emergency_tp_pct()))
 
         tp_base = min(reference_price, last_price) if last_price > 0 else reference_price
-        return self.bybit.normalize_price(symbol, tp_base * (1 - EMERGENCY_TP_PCT))
+        return self.bybit.normalize_price(symbol, tp_base * (1 - self._emergency_tp_pct()))
 
     def _is_signal_desynced(self, trade, current_entry):
         symbol = trade["symbol"]
@@ -764,7 +776,7 @@ class OrderWatcher:
                 unfavorable_move = current_entry < signal_entry
                 deviation = (signal_entry - current_entry) / signal_entry
 
-            if unfavorable_move and deviation >= MAX_SIGNAL_DESYNC_PCT:
+            if unfavorable_move and deviation >= self._max_signal_desync_pct():
                 return True, f"unfavorable entry deviation {deviation * 100:.2f}%"
 
         if side == "LONG":

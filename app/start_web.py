@@ -10,8 +10,8 @@ async def main():
     base_logger = setup_logger()
     web_logger = get_source_logger(base_logger, "Web")
 
-    bybit = BybitClient(logger=web_logger)
     storage = Storage()
+    bybit = BybitClient(logger=web_logger, storage=storage)
     dashboard = DashboardService(bybit, storage, web_logger)
 
     web_logger.info("Trader web started")

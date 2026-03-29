@@ -3,11 +3,11 @@ import json
 from classes.webui.i18n.registry import TRANSLATIONS
 
 
-def build_trader_dashboard_js(brand_name, refresh_ms):
+def build_trader_dashboard_js(refresh_ms):
     translations_json = json.dumps(TRANSLATIONS, ensure_ascii=False)
     return f"""
     const refreshMs = {refresh_ms};
-    const baseTitle = {json.dumps(f"{brand_name} Trader", ensure_ascii=False)};
+    const baseTitle = "Trader Bot";
     const pageSize = 10;
     const langCookie = 'ui_lang';
     let currentRange = 'current_month';
@@ -19,7 +19,55 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
     let closedPage = 1;
     let exchangeStatusTimer = null;
     let lastExchangeStatusKey = '';
+    let settingsPayload = null;
     const translations = {translations_json};
+    const settingsGroups = {{
+      general: ['tz', 'dashboard_refresh_sec'],
+      bybit: ['bybit_testnet'],
+      telegram: ['telegram_chat_id'],
+      trading: ['max_position_multiplier', 'max_entry_deviation_pct', 'max_signal_desync_pct', 'emergency_tp_pct', 'pending_entry_timeout_sec'],
+    }};
+    const timezones = [
+      'UTC',
+      'Europe/Kyiv',
+      'Europe/Warsaw',
+      'Europe/Berlin',
+      'Europe/Paris',
+      'Europe/London',
+      'Europe/Madrid',
+      'Europe/Rome',
+      'Europe/Athens',
+      'Europe/Istanbul',
+      'America/New_York',
+      'America/Chicago',
+      'America/Denver',
+      'America/Los_Angeles',
+      'America/Toronto',
+      'America/Sao_Paulo',
+      'Asia/Dubai',
+      'Asia/Kolkata',
+      'Asia/Bangkok',
+      'Asia/Singapore',
+      'Asia/Hong_Kong',
+      'Asia/Tokyo',
+      'Asia/Seoul',
+      'Australia/Sydney',
+    ];
+    const settingsLabels = {{
+      tz: 'Timezone',
+      dashboard_refresh_sec: 'Dashboard Refresh Sec',
+      bybit_testnet: 'Bybit Testnet',
+      telegram_chat_id: 'Telegram Chat ID',
+      max_position_multiplier: 'Max Position Multiplier',
+      max_entry_deviation_pct: 'Max Entry Deviation Pct',
+      max_signal_desync_pct: 'Max Signal Desync Pct',
+      emergency_tp_pct: 'Emergency TP Pct',
+      pending_entry_timeout_sec: 'Pending Entry Timeout Sec',
+      bybit_api_key: 'Bybit API Key',
+      bybit_api_secret: 'Bybit API Secret',
+      telegram_api_id: 'Telegram API ID',
+      telegram_api_hash: 'Telegram API Hash',
+    }};
     function tr(text) {{
       const dict = translations[currentLang] || translations.en;
       return dict[text] || translations.en[text] || text;
@@ -84,17 +132,32 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       if (select) select.value = currentLang;
       document.querySelector('.topbar h1').textContent = tr('Trader Bot Dashboard');
       document.querySelector('.range-label').textContent = tr('statsPeriod');
+      const settingsTitle = document.getElementById('settings-title');
+      if (settingsTitle) settingsTitle.textContent = tr('Settings');
+      const settingsGeneralTitle = document.getElementById('settings-general-title');
+      if (settingsGeneralTitle) settingsGeneralTitle.textContent = tr('General Settings');
+      const settingsTradingTitle = document.getElementById('settings-trading-title');
+      if (settingsTradingTitle) settingsTradingTitle.textContent = tr('Trading Settings');
+      const settingsBybitTitle = document.getElementById('settings-bybit-title');
+      if (settingsBybitTitle) settingsBybitTitle.textContent = tr('Bybit');
+      const settingsTelegramTitle = document.getElementById('settings-telegram-title');
+      if (settingsTelegramTitle) settingsTelegramTitle.textContent = tr('Telegram');
+      const settingsCancel = document.getElementById('settings-cancel');
+      if (settingsCancel) settingsCancel.textContent = tr('Cancel');
+      const settingsSave = document.getElementById('settings-save');
+      if (settingsSave) settingsSave.textContent = tr('Save');
       document.querySelectorAll('#range-select option').forEach(option => {{
         option.textContent = rangeLabel(option.value);
       }});
       const panelTitles = document.querySelectorAll('.panel h3');
       if (panelTitles[0]) panelTitles[0].textContent = tr('Active Trades');
       if (panelTitles[1]) panelTitles[1].textContent = tr('Closed Trades');
-      if (panelTitles[2]) panelTitles[2].textContent = tr('Balance Curve');
-      document.getElementById('equity-caption').textContent = tr('Loading balance curve...');
+      if (panelTitles[2]) panelTitles[2].textContent = tr('Balance History');
+      document.getElementById('equity-caption').textContent = tr('Loading balance history...');
       document.querySelectorAll('th').forEach(th => {{
         th.textContent = tr(th.textContent.trim());
       }});
+      if (settingsPayload) renderSettings();
       applyTheme(getCookie('ui_theme') || 'auto');
     }}
     function applyEmbedMode() {{
@@ -326,6 +389,128 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       const isMobile = window.matchMedia('(max-width: 820px)').matches || window.matchMedia('(pointer: coarse)').matches;
       document.body.classList.toggle('mobile', isMobile);
     }}
+    function settingLabel(key) {{
+      return tr(settingsLabels[key] || key);
+    }}
+    function settingInput(key, value, type) {{
+      if (key === 'tz') {{
+        const selected = String(value ?? 'UTC');
+        return `<select data-setting="${{key}}">
+          ${{timezones.map((zone) => `<option value="${{zone}}" ${{zone === selected ? 'selected' : ''}}>${{zone}}</option>`).join('')}}
+        </select>`;
+      }}
+      if (type === 'bool') {{
+        return `<select data-setting="${{key}}">
+          <option value="true" ${{value ? 'selected' : ''}}>${{tr('Enabled')}}</option>
+          <option value="false" ${{!value ? 'selected' : ''}}>${{tr('Disabled')}}</option>
+        </select>`;
+      }}
+      const inputType = type === 'int' || type === 'float' ? 'number' : 'text';
+      const step = type === 'float' ? 'any' : '1';
+      return `<input data-setting="${{key}}" type="${{inputType}}" step="${{step}}" value="${{value ?? ''}}">`;
+    }}
+    function renderSettingsGroup(containerId, keys, values, schema) {{
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      container.innerHTML = keys.map((key) => {{
+        const meta = schema[key] || {{ type: 'str' }};
+        const value = values[key];
+        return `<div class="settings-field">
+          <label>${{settingLabel(key)}}</label>
+          ${{settingInput(key, value, meta.type)}}
+        </div>`;
+      }}).join('');
+    }}
+    function secretInputType(key, type) {{
+      if (type === 'int') return 'number';
+      if (key.includes('secret') || key.includes('hash')) return 'password';
+      return 'text';
+    }}
+    function renderSecretFields(containerId, entries) {{
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      container.insertAdjacentHTML('beforeend', entries.map(([key, item]) => `
+        <div class="settings-field">
+          <label>${{settingLabel(key)}}</label>
+          <input
+            data-secret="${{key}}"
+            type="${{secretInputType(key, (((settingsPayload || {{}}).secret_schema || {{}})[key] || {{}}).type || 'str')}}"
+            value=""
+            placeholder="${{item.configured ? item.masked : 'Not set'}}"
+            autocomplete="off"
+          >
+          <div class="settings-hint">${{tr('Stored encrypted in DB. Leave blank to keep current value.')}}</div>
+        </div>
+      `).join(''));
+    }}
+    function renderSecrets(secrets) {{
+      const entries = Object.entries(secrets || {{}});
+      renderSecretFields('settings-bybit', entries.filter(([key]) => key.startsWith('bybit_')));
+      renderSecretFields('settings-telegram', entries.filter(([key]) => key.startsWith('telegram_')));
+      const note = document.getElementById('settings-note');
+      if (note) note.textContent = tr('Secrets are stored encrypted in DB.');
+    }}
+    function renderSettings() {{
+      if (!settingsPayload) return;
+      renderSettingsGroup('settings-general', settingsGroups.general, settingsPayload.settings || {{}}, settingsPayload.schema || {{}});
+      renderSettingsGroup('settings-bybit', settingsGroups.bybit, settingsPayload.settings || {{}}, settingsPayload.schema || {{}});
+      renderSettingsGroup('settings-telegram', settingsGroups.telegram, settingsPayload.settings || {{}}, settingsPayload.schema || {{}});
+      renderSettingsGroup('settings-trading', settingsGroups.trading, settingsPayload.settings || {{}}, settingsPayload.schema || {{}});
+      renderSecrets(settingsPayload.secrets || {{}});
+    }}
+    async function loadSettings() {{
+      const res = await fetch('api/settings', {{ cache: 'no-store' }});
+      settingsPayload = await res.json();
+      renderSettings();
+    }}
+    function openSettings() {{
+      const modal = document.getElementById('settings-modal');
+      if (!modal) return;
+      loadSettings().then(() => {{
+        modal.hidden = false;
+      }});
+    }}
+    function closeSettings() {{
+      const modal = document.getElementById('settings-modal');
+      if (modal) modal.hidden = true;
+    }}
+    async function saveSettings() {{
+      const payload = {{ settings: {{}} }};
+      document.querySelectorAll('[data-setting]').forEach((node) => {{
+        const key = node.getAttribute('data-setting');
+        const type = ((settingsPayload || {{}}).schema || {{}})[key]?.type || 'str';
+        let value = node.value;
+        if (type === 'bool') value = value === 'true';
+        if (type === 'int') value = Number.parseInt(value || '0', 10);
+        if (type === 'float') value = Number.parseFloat(value || '0');
+        payload.settings[key] = value;
+      }});
+      payload.secrets = {{}};
+      document.querySelectorAll('[data-secret]').forEach((node) => {{
+        const key = node.getAttribute('data-secret');
+        const rawValue = String(node.value || '').trim();
+        if (!rawValue) return;
+        const type = ((settingsPayload || {{}}).secret_schema || {{}})[key]?.type || 'str';
+        let value = rawValue;
+        if (type === 'int') value = Number.parseInt(rawValue, 10);
+        payload.secrets[key] = value;
+      }});
+      const res = await fetch('api/settings', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload),
+      }});
+      const data = await res.json();
+      if (!res.ok || !data.ok) {{
+        throw new Error(data.error || 'save_failed');
+      }}
+      settingsPayload = {{
+        ...(settingsPayload || {{}}),
+        settings: data.settings || payload.settings,
+      }};
+      closeSettings();
+      window.location.reload();
+    }}
     function rangeLabel(value) {{
       const labels = {{
         today: 'today',
@@ -513,6 +698,25 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       langSelect.addEventListener('change', async () => {{
         applyLanguage(langSelect.value || 'en');
         await refresh();
+      }});
+    }}
+    const settingsToggle = document.getElementById('settings-toggle');
+    if (settingsToggle) settingsToggle.addEventListener('click', openSettings);
+    const settingsClose = document.getElementById('settings-close');
+    if (settingsClose) settingsClose.addEventListener('click', closeSettings);
+    const settingsCancel = document.getElementById('settings-cancel');
+    if (settingsCancel) settingsCancel.addEventListener('click', closeSettings);
+    const settingsBackdrop = document.getElementById('settings-backdrop');
+    if (settingsBackdrop) settingsBackdrop.addEventListener('click', closeSettings);
+    const settingsSave = document.getElementById('settings-save');
+    if (settingsSave) {{
+      settingsSave.addEventListener('click', async () => {{
+        try {{
+          await saveSettings();
+        }} catch (error) {{
+          const node = document.getElementById('settings-note');
+          if (node) node.textContent = `${{tr('Save failed')}}: ${{error.message || error}}`;
+        }}
       }});
     }}
     applyEmbedMode();

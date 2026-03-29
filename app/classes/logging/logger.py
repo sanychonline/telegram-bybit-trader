@@ -2,7 +2,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from config import DATA_REPORTS_DIR, TZ, LOG_TO_FILE, LOG_LEVEL, LOG_MAX_BYTES, LOG_BACKUP_COUNT
+from config import DATA_BOT_LOG_PATH, TZ, LOG_TO_FILE, LOG_LEVEL, LOG_MAX_BYTES, LOG_BACKUP_COUNT
 import pytz
 
 
@@ -45,10 +45,10 @@ def setup_logger():
     logger.addHandler(console_handler)
 
     if LOG_TO_FILE:
-        os.makedirs(DATA_REPORTS_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(DATA_BOT_LOG_PATH), exist_ok=True)
 
         file_handler = RotatingFileHandler(
-            f"{DATA_REPORTS_DIR}/bot.log",
+            DATA_BOT_LOG_PATH,
             maxBytes=LOG_MAX_BYTES,
             backupCount=LOG_BACKUP_COUNT,
             encoding="utf-8",

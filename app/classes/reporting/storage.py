@@ -1,37 +1,162 @@
 import json
 import os
-import csv
 import sqlite3
 import threading
+import base64
+import hashlib
+import hmac
+import secrets
 from datetime import datetime
 from uuid import uuid4
-from pathlib import Path
-from config import DATA_DIR, DATA_REPORTS_DIR, DATA_STORAGE_DIR
+from config import (
+    DATA_DIR,
+    DATA_TRADES_PATH,
+    DATA_BALANCE_HISTORY_PATH,
+    DATA_TRANSACTION_HISTORY_PATH,
+    DATA_HISTORY_DB_PATH,
+    DATA_SECRETS_KEY_PATH,
+    TZ,
+    BYBIT_API_KEY,
+    BYBIT_API_SECRET,
+    BYBIT_TESTNET,
+    TELEGRAM_API_ID,
+    TELEGRAM_API_HASH,
+    TELEGRAM_CHAT_ID,
+    DASHBOARD_REFRESH_SEC,
+    MAX_POSITION_MULTIPLIER,
+    MAX_ENTRY_DEVIATION_PCT,
+    MAX_SIGNAL_DESYNC_PCT,
+    EMERGENCY_TP_PCT,
+    PENDING_ENTRY_TIMEOUT_SEC,
+)
 
 BALANCE_HISTORY_LIMIT = 10000
 TRANSACTION_HISTORY_LIMIT = 50000
+APP_SETTINGS_SCHEMA = {
+    "tz": {"type": "str", "default": TZ},
+    "dashboard_refresh_sec": {"type": "int", "default": DASHBOARD_REFRESH_SEC},
+    "bybit_testnet": {"type": "bool", "default": BYBIT_TESTNET},
+    "telegram_chat_id": {"type": "int", "default": TELEGRAM_CHAT_ID},
+    "max_position_multiplier": {"type": "float", "default": MAX_POSITION_MULTIPLIER},
+    "max_entry_deviation_pct": {"type": "float", "default": MAX_ENTRY_DEVIATION_PCT},
+    "max_signal_desync_pct": {"type": "float", "default": MAX_SIGNAL_DESYNC_PCT},
+    "emergency_tp_pct": {"type": "float", "default": EMERGENCY_TP_PCT},
+    "pending_entry_timeout_sec": {"type": "int", "default": PENDING_ENTRY_TIMEOUT_SEC},
+}
+APP_SECRETS_SCHEMA = {
+    "bybit_api_key": {"type": "str", "default": BYBIT_API_KEY},
+    "bybit_api_secret": {"type": "str", "default": BYBIT_API_SECRET},
+    "telegram_api_id": {"type": "int", "default": TELEGRAM_API_ID},
+    "telegram_api_hash": {"type": "str", "default": TELEGRAM_API_HASH},
+}
 
 
 class Storage:
-    def __init__(self, path=f"{DATA_STORAGE_DIR}/trades.json"):
+    SETTINGS_REVISION_KEY = "settings.revision"
+
+    def __init__(self, path=DATA_TRADES_PATH):
         self.path = path
-        self.balance_history_path = f"{DATA_STORAGE_DIR}/balance_history.json"
-        self.transaction_history_path = f"{DATA_STORAGE_DIR}/transaction_history.json"
-        self.history_db_path = f"{DATA_STORAGE_DIR}/history.sqlite3"
+        self.balance_history_path = DATA_BALANCE_HISTORY_PATH
+        self.transaction_history_path = DATA_TRANSACTION_HISTORY_PATH
+        self.history_db_path = DATA_HISTORY_DB_PATH
+        self.secrets_key_path = DATA_SECRETS_KEY_PATH
         os.makedirs(DATA_DIR, exist_ok=True)
-        os.makedirs(DATA_REPORTS_DIR, exist_ok=True)
-        os.makedirs(DATA_STORAGE_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(self.path) or DATA_DIR, exist_ok=True)
         self.lock = threading.RLock()
 
-        self.data = {}
-        self.balance_history = []
         self.transaction_history = []
         self.transaction_history_meta = {}
-        self.report_path = f"{DATA_REPORTS_DIR}/report.csv"
 
-        self._ensure_report_header()
+        self._ensure_secrets_key()
         self._ensure_history_db()
         self.load()
+
+    def _ensure_secrets_key(self):
+        if os.path.exists(self.secrets_key_path):
+            return
+
+        key_bytes = secrets.token_bytes(32)
+        encoded = base64.urlsafe_b64encode(key_bytes).decode("ascii")
+        fd = os.open(self.secrets_key_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            try:
+                os.chmod(self.secrets_key_path, 0o600)
+            except Exception:
+                pass
+
+    def _load_secrets_key(self):
+        with open(self.secrets_key_path, "r") as handle:
+            raw = handle.read().strip()
+        return base64.urlsafe_b64decode(raw.encode("ascii"))
+
+    def _normalize_secret(self, key, value):
+        schema = APP_SECRETS_SCHEMA.get(key)
+        if not schema:
+            raise ValueError(f"Unknown app secret: {key}")
+        if value is None:
+            return None
+        if schema["type"] == "int":
+            return int(value)
+        return str(value)
+
+    def _encrypt_secret_value(self, value):
+        if value is None:
+            return None
+
+        plaintext = str(value).encode("utf-8")
+        master = self._load_secrets_key()
+        nonce = secrets.token_bytes(16)
+        enc_key = hashlib.sha256(master + b":enc").digest()
+        mac_key = hashlib.sha256(master + b":mac").digest()
+
+        ciphertext = bytearray()
+        counter = 0
+        while len(ciphertext) < len(plaintext):
+            block = hashlib.sha256(enc_key + nonce + counter.to_bytes(4, "big")).digest()
+            ciphertext.extend(block)
+            counter += 1
+        ciphertext = bytes(a ^ b for a, b in zip(plaintext, ciphertext[:len(plaintext)]))
+        tag = hmac.new(mac_key, nonce + ciphertext, hashlib.sha256).digest()
+
+        return ":".join([
+            "v1",
+            base64.urlsafe_b64encode(nonce).decode("ascii"),
+            base64.urlsafe_b64encode(ciphertext).decode("ascii"),
+            base64.urlsafe_b64encode(tag).decode("ascii"),
+        ])
+
+    def _decrypt_secret_value(self, payload):
+        if not payload:
+            return None
+
+        version, nonce_b64, cipher_b64, tag_b64 = str(payload).split(":", 3)
+        if version != "v1":
+            raise ValueError("Unsupported secret payload version")
+
+        nonce = base64.urlsafe_b64decode(nonce_b64.encode("ascii"))
+        ciphertext = base64.urlsafe_b64decode(cipher_b64.encode("ascii"))
+        expected_tag = base64.urlsafe_b64decode(tag_b64.encode("ascii"))
+
+        master = self._load_secrets_key()
+        enc_key = hashlib.sha256(master + b":enc").digest()
+        mac_key = hashlib.sha256(master + b":mac").digest()
+        actual_tag = hmac.new(mac_key, nonce + ciphertext, hashlib.sha256).digest()
+        if not hmac.compare_digest(expected_tag, actual_tag):
+            raise ValueError("Secret payload authentication failed")
+
+        plaintext = bytearray()
+        counter = 0
+        while len(plaintext) < len(ciphertext):
+            block = hashlib.sha256(enc_key + nonce + counter.to_bytes(4, "big")).digest()
+            plaintext.extend(block)
+            counter += 1
+        plaintext = bytes(a ^ b for a, b in zip(ciphertext, plaintext[:len(ciphertext)]))
+        return plaintext.decode("utf-8")
 
     def _db_connect(self):
         conn = sqlite3.connect(self.history_db_path, timeout=5.0)
@@ -109,6 +234,16 @@ class Storage:
                     ON execution_events(exec_time);
                     CREATE INDEX IF NOT EXISTS idx_execution_symbol_time
                     ON execution_events(symbol, exec_time);
+                    CREATE TABLE IF NOT EXISTS app_settings (
+                        key TEXT PRIMARY KEY,
+                        value_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS app_secrets (
+                        key TEXT PRIMARY KEY,
+                        value_enc TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
                     CREATE TABLE IF NOT EXISTS signal_events (
                         signal_key TEXT PRIMARY KEY,
                         message_id TEXT,
@@ -120,6 +255,32 @@ class Storage:
                     );
                     CREATE INDEX IF NOT EXISTS idx_signal_created_at
                     ON signal_events(created_at);
+                    CREATE TABLE IF NOT EXISTS bot_trades (
+                        trade_id TEXT PRIMARY KEY,
+                        symbol TEXT,
+                        side TEXT,
+                        status TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        message_id TEXT,
+                        order_id TEXT,
+                        raw_json TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_bot_trades_created_at
+                    ON bot_trades(created_at);
+                    CREATE INDEX IF NOT EXISTS idx_bot_trades_symbol_status
+                    ON bot_trades(symbol, status);
+                    CREATE INDEX IF NOT EXISTS idx_bot_trades_message_id
+                    ON bot_trades(message_id);
+                    CREATE TABLE IF NOT EXISTS balance_snapshots (
+                        captured_at TEXT PRIMARY KEY,
+                        wallet_balance REAL NOT NULL,
+                        available_balance REAL NOT NULL,
+                        equity REAL NOT NULL,
+                        raw_json TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_balance_snapshots_captured_at
+                    ON balance_snapshots(captured_at);
                     CREATE TABLE IF NOT EXISTS exchange_closed_trades (
                         trade_key TEXT PRIMARY KEY,
                         trade_id TEXT,
@@ -161,25 +322,21 @@ class Storage:
                         raw = json.load(f)
 
                         if isinstance(raw, dict):
-                            self.data = raw
-                        else:
-                            self.data = {}
+                            self._import_trades_json_if_needed(raw)
                 except Exception as e:
                     print(f"Storage load error: {e}")
                     self._backup_corrupted_file()
-                    self.data = {}
 
             if os.path.exists(self.balance_history_path):
                 try:
                     with open(self.balance_history_path, "r") as f:
                         raw = json.load(f)
                         if isinstance(raw, list):
-                            self.balance_history = [item for item in raw if isinstance(item, dict)]
-                        else:
-                            self.balance_history = []
+                            self._import_balance_history_json_if_needed(
+                                [item for item in raw if isinstance(item, dict)]
+                            )
                 except Exception as e:
                     print(f"Balance history load error: {e}")
-                    self.balance_history = []
 
             if os.path.exists(self.transaction_history_path):
                 try:
@@ -206,72 +363,10 @@ class Storage:
                 if self.transaction_history_meta:
                     self._save_sync_state_to_db()
 
-            self._backfill_signal_events_from_trades()
-            self._backfill_signal_event_statuses_from_trades()
-
-    def save(self):
-        with self.lock:
-            try:
-                path = Path(self.path)
-                tmp_path = path.with_suffix(f"{path.suffix}.tmp")
-
-                with open(tmp_path, "w") as f:
-                    json.dump(self.data, f, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-
-                os.replace(tmp_path, path)
-            except Exception as e:
-                print(f"Storage save error: {e}")
-                try:
-                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
-
-    def save_balance_history(self):
-        with self.lock:
-            try:
-                path = Path(self.balance_history_path)
-                tmp_path = path.with_suffix(f"{path.suffix}.tmp")
-
-                with open(tmp_path, "w") as f:
-                    json.dump(self.balance_history, f, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-
-                os.replace(tmp_path, path)
-            except Exception as e:
-                print(f"Balance history save error: {e}")
-                try:
-                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
-
-    def save_transaction_history(self):
-        with self.lock:
-            try:
-                path = Path(self.transaction_history_path)
-                tmp_path = path.with_suffix(f"{path.suffix}.tmp")
-                payload = {
-                    "events": self.transaction_history,
-                    "meta": self.transaction_history_meta,
-                }
-
-                with open(tmp_path, "w") as f:
-                    json.dump(payload, f, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-
-                os.replace(tmp_path, path)
-            except Exception as e:
-                print(f"Transaction history save error: {e}")
-                try:
-                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
+        self._seed_app_settings()
+        self._seed_app_secrets()
+        self._backfill_signal_events_from_trades()
+        self._backfill_signal_event_statuses_from_trades()
 
     def _save_sync_state_to_db(self):
         if not self.transaction_history_meta:
@@ -289,6 +384,29 @@ class Storage:
             conn.commit()
         finally:
             conn.close()
+
+    def _touch_settings_revision(self):
+        conn = self._db_connect()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO sync_state(key, value) VALUES(?, ?)",
+                (self.SETTINGS_REVISION_KEY, datetime.utcnow().isoformat()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_settings_revision(self):
+        conn = self._db_connect()
+        try:
+            row = conn.execute(
+                "SELECT value FROM sync_state WHERE key = ? LIMIT 1",
+                (self.SETTINGS_REVISION_KEY,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        return str(row["value"]) if row and row["value"] else ""
 
     def get_named_sync_state(self, prefix):
         conn = self._db_connect()
@@ -325,6 +443,265 @@ class Storage:
         finally:
             conn.close()
 
+    def _normalize_app_setting(self, key, value):
+        schema = APP_SETTINGS_SCHEMA.get(key)
+        if not schema:
+            raise ValueError(f"Unknown app setting: {key}")
+
+        setting_type = schema["type"]
+        if setting_type == "bool":
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"true", "1", "yes", "on"}:
+                    return True
+                if lowered in {"false", "0", "no", "off"}:
+                    return False
+            return bool(value)
+        if setting_type == "int":
+            return int(value)
+        if setting_type == "float":
+            return float(value)
+        return str(value)
+
+    def _seed_app_settings(self):
+        conn = self._db_connect()
+        try:
+            rows = conn.execute("SELECT key FROM app_settings").fetchall()
+            existing_keys = {str(row["key"]) for row in rows}
+            now = datetime.utcnow().isoformat()
+            inserts = []
+            for key, schema in APP_SETTINGS_SCHEMA.items():
+                if key in existing_keys:
+                    continue
+                inserts.append((key, json.dumps(schema["default"]), now))
+            if inserts:
+                conn.executemany(
+                    """
+                    INSERT INTO app_settings(key, value_json, updated_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    inserts,
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+    def _seed_app_secrets(self):
+        conn = self._db_connect()
+        try:
+            rows = conn.execute("SELECT key FROM app_secrets").fetchall()
+            existing_keys = {str(row["key"]) for row in rows}
+            now = datetime.utcnow().isoformat()
+            inserts = []
+            for key, schema in APP_SECRETS_SCHEMA.items():
+                if key in existing_keys:
+                    continue
+                default_value = schema.get("default")
+                if default_value in [None, ""]:
+                    continue
+                normalized = self._normalize_secret(key, default_value)
+                encrypted = self._encrypt_secret_value(normalized)
+                inserts.append((key, encrypted, now))
+            if inserts:
+                conn.executemany(
+                    """
+                    INSERT INTO app_secrets(key, value_enc, updated_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    inserts,
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+    def get_app_settings(self):
+        conn = self._db_connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT key, value_json, updated_at
+                FROM app_settings
+                ORDER BY key ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+
+        payload = {}
+        for row in rows:
+            key = str(row["key"])
+            try:
+                value = json.loads(row["value_json"])
+            except Exception:
+                value = row["value_json"]
+            payload[key] = {
+                "value": value,
+                "updated_at": row["updated_at"],
+            }
+        return payload
+
+    def get_app_setting(self, key, default=None):
+        schema = APP_SETTINGS_SCHEMA.get(key)
+        fallback = schema["default"] if schema else default
+
+        conn = self._db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT value_json
+                FROM app_settings
+                WHERE key = ?
+                LIMIT 1
+                """,
+                (key,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return fallback
+
+        try:
+            value = json.loads(row["value_json"])
+        except Exception:
+            value = row["value_json"]
+
+        if not schema:
+            return value
+
+        try:
+            return self._normalize_app_setting(key, value)
+        except Exception:
+            return fallback
+
+    def get_app_secret(self, key, default=None):
+        schema = APP_SECRETS_SCHEMA.get(key)
+        fallback = schema["default"] if schema else default
+
+        conn = self._db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT value_enc
+                FROM app_secrets
+                WHERE key = ?
+                LIMIT 1
+                """,
+                (key,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return fallback
+
+        try:
+            decrypted = self._decrypt_secret_value(row["value_enc"])
+            return self._normalize_secret(key, decrypted) if schema else decrypted
+        except Exception:
+            return fallback
+
+    def get_app_secrets_meta(self):
+        conn = self._db_connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT key, updated_at
+                FROM app_secrets
+                ORDER BY key ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+
+        meta = {
+            key: {
+                "configured": False,
+                "updated_at": None,
+                "source": "missing",
+            }
+            for key in APP_SECRETS_SCHEMA
+        }
+        for row in rows:
+            key = str(row["key"])
+            if key in meta:
+                meta[key] = {
+                    "configured": True,
+                    "updated_at": row["updated_at"],
+                    "source": "db",
+                }
+        return meta
+
+    def update_app_settings(self, updates):
+        if not isinstance(updates, dict) or not updates:
+            return {}
+
+        now = datetime.utcnow().isoformat()
+        rows = []
+        normalized = {}
+        for key, value in updates.items():
+            if key not in APP_SETTINGS_SCHEMA:
+                continue
+            normalized_value = self._normalize_app_setting(key, value)
+            normalized[key] = normalized_value
+            rows.append((key, json.dumps(normalized_value), now))
+
+        if not rows:
+            return {}
+
+        conn = self._db_connect()
+        try:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO app_settings(key, value_json, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self._touch_settings_revision()
+        return normalized
+
+    def update_app_secrets(self, updates):
+        if not isinstance(updates, dict) or not updates:
+            return {}
+
+        now = datetime.utcnow().isoformat()
+        rows = []
+        normalized = {}
+        for key, value in updates.items():
+            if key not in APP_SECRETS_SCHEMA:
+                continue
+            if value in [None, ""]:
+                continue
+            normalized_value = self._normalize_secret(key, value)
+            normalized[key] = normalized_value
+            rows.append((key, self._encrypt_secret_value(normalized_value), now))
+
+        if not rows:
+            return {}
+
+        conn = self._db_connect()
+        try:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO app_secrets(key, value_enc, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self._touch_settings_revision()
+        return normalized
+
     def _backup_corrupted_file(self):
         if not os.path.exists(self.path):
             return
@@ -338,95 +715,169 @@ class Storage:
         except Exception as e:
             print(f"Storage backup error: {e}")
 
-    def _ensure_report_header(self):
-        with self.lock:
-            if not os.path.exists(self.report_path) or os.path.getsize(self.report_path) == 0:
-                with open(self.report_path, "w", newline="") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        "time",
-                        "symbol",
-                        "side",
-                        "entry",
-                        "exit",
-                        "size",
-                        "pnl",
-                        "pnl_pct",
-                        "reason",
-                        "sl_initial",
-                        "sl_final",
-                        "tp1_price",
-                        "tp2_price",
-                        "tp3_price",
-                        "tp1_hit",
-                        "be_moved",
-                        "duration_sec"
-                    ])
+    def _has_bot_trades_in_db(self):
+        conn = self._db_connect()
+        try:
+            row = conn.execute("SELECT 1 FROM bot_trades LIMIT 1").fetchone()
+            return bool(row)
+        finally:
+            conn.close()
 
-    def _append_to_report(self, trade):
-        with self.lock:
-            try:
-                entry = float(trade.get("entry", 0) or 0)
-                exit_price = trade.get("exit")
-                if exit_price is None:
-                    exit_price = trade.get("exit_price")
-                exit_price = float(exit_price or 0)
-                size = float(trade.get("filled_size", 0) or 0)
-                pnl = float(trade.get("pnl", 0) or 0)
-                side = trade.get("side")
-                reason = trade.get("close_reason") or trade.get("exit_reason")
-                tps = trade.get("tps", [])
+    def _has_balance_snapshots_in_db(self):
+        conn = self._db_connect()
+        try:
+            row = conn.execute("SELECT 1 FROM balance_snapshots LIMIT 1").fetchone()
+            return bool(row)
+        finally:
+            conn.close()
 
-                if entry > 0 and exit_price > 0:
-                    if side == "LONG":
-                        pnl_pct = ((exit_price - entry) / entry) * 100
-                    else:
-                        pnl_pct = ((entry - exit_price) / entry) * 100
-                else:
-                    pnl_pct = 0
+    def _upsert_bot_trade(self, trade):
+        if not isinstance(trade, dict):
+            return None
 
-                duration = 0
-                created_at = trade.get("created_at")
-                closed_at = trade.get("closed_at")
-                if created_at and closed_at:
-                    try:
-                        duration = int(
-                            (
-                                datetime.fromisoformat(closed_at)
-                                - datetime.fromisoformat(created_at)
-                            ).total_seconds()
-                        )
-                    except Exception:
-                        duration = 0
+        trade_id = str(trade.get("id") or trade.get("trade_id") or "")
+        if not trade_id:
+            return None
 
-                tp1 = tps[0]["price"] if len(tps) > 0 else None
-                tp2 = tps[1]["price"] if len(tps) > 1 else None
-                tp3 = tps[2]["price"] if len(tps) > 2 else None
-                tp1_hit = bool(trade.get("tp_hits", 0) > 0 or (tps and tps[0].get("hit")))
+        created_at = trade.get("created_at") or datetime.utcnow().isoformat()
+        updated_at = trade.get("updated_at") or created_at
+        payload = dict(trade)
+        payload["id"] = trade_id
+        payload["created_at"] = created_at
+        payload["updated_at"] = updated_at
 
-                with open(self.report_path, "a", newline="") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        closed_at or datetime.utcnow().isoformat(),
-                        trade.get("symbol"),
-                        side,
-                        round(entry, 4),
-                        round(exit_price, 4),
-                        round(size, 4),
-                        round(pnl, 4),
-                        round(pnl_pct, 4),
-                        reason,
-                        trade.get("sl_initial"),
-                        trade.get("sl"),
-                        tp1,
-                        tp2,
-                        tp3,
-                        tp1_hit,
-                        trade.get("be_moved", False),
-                        duration
-                    ])
-            except Exception as e:
-                print(f"Report write error: {e}")
+        conn = self._db_connect()
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO bot_trades(
+                    trade_id, symbol, side, status, created_at, updated_at, message_id, order_id, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trade_id,
+                    payload.get("symbol"),
+                    payload.get("side"),
+                    payload.get("status"),
+                    created_at,
+                    updated_at,
+                    str(payload.get("message_id") or ""),
+                    payload.get("order_id"),
+                    json.dumps(payload),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return trade_id
+
+    def _import_trades_json_if_needed(self, trades):
+        if self._has_bot_trades_in_db():
+            return
+        for trade in trades.values():
+            if isinstance(trade, dict):
+                self._upsert_bot_trade(trade)
+
+    def _get_trade_row(self, trade_id):
+        conn = self._db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT raw_json
+                FROM bot_trades
+                WHERE trade_id = ?
+                LIMIT 1
+                """,
+                (str(trade_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            return json.loads(row["raw_json"])
+        except Exception:
+            return None
+
+    def _query_bot_trades(self, where_clause="", params=()):
+        conn = self._db_connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT raw_json
+                FROM bot_trades
+                {where_clause}
+                ORDER BY created_at ASC, trade_id ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [json.loads(row["raw_json"]) for row in rows]
+
+    def _import_balance_history_json_if_needed(self, items):
+        if self._has_balance_snapshots_in_db():
+            return
+        for item in items:
+            if isinstance(item, dict):
+                self._upsert_balance_snapshot(item)
+
+    def _upsert_balance_snapshot(self, snapshot):
+        if not isinstance(snapshot, dict):
+            return
+        captured_at = snapshot.get("captured_at")
+        if not captured_at:
+            return
+        wallet_balance = float(snapshot.get("wallet_balance", 0.0) or 0.0)
+        available_balance = float(snapshot.get("available_balance", 0.0) or 0.0)
+        equity = float(snapshot.get("equity", 0.0) or 0.0)
+        payload = {
+            "captured_at": captured_at,
+            "wallet_balance": round(wallet_balance, 8),
+            "available_balance": round(available_balance, 8),
+            "equity": round(equity, 8),
+        }
+
+        conn = self._db_connect()
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO balance_snapshots(
+                    captured_at, wallet_balance, available_balance, equity, raw_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    captured_at,
+                    payload["wallet_balance"],
+                    payload["available_balance"],
+                    payload["equity"],
+                    json.dumps(payload),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _get_last_balance_snapshot(self):
+        conn = self._db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT raw_json
+                FROM balance_snapshots
+                ORDER BY captured_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            return json.loads(row["raw_json"])
+        except Exception:
+            return None
 
     def create_trade(self, trade_dict):
         with self.lock:
@@ -445,26 +896,22 @@ class Storage:
                 "updated_at": datetime.utcnow().isoformat()
             }
 
-            self.data[trade_id] = trade
-            self.save()
-
-            return trade_id
+            return self._upsert_bot_trade(trade)
 
     def update_trade(self, trade_id, updates: dict):
         with self.lock:
-            trade = self.data.get(trade_id)
+            trade = self.get_trade(trade_id)
 
             if not isinstance(trade, dict):
                 return
 
             trade.update(updates)
             trade["updated_at"] = datetime.utcnow().isoformat()
-
-            self.save()
+            self._upsert_bot_trade(trade)
 
     def get_trade(self, trade_id):
         with self.lock:
-            trade = self.data.get(trade_id)
+            trade = self._get_trade_row(trade_id)
             return dict(trade) if isinstance(trade, dict) else None
 
     def record_signal_event(self, payload):
@@ -480,6 +927,25 @@ class Storage:
 
         conn = self._db_connect()
         try:
+            existing = conn.execute(
+                """
+                SELECT raw_json
+                FROM signal_events
+                WHERE signal_key = ? OR message_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (signal_key, str(message_id or "")),
+            ).fetchone()
+            if existing:
+                try:
+                    merged_payload = json.loads(existing["raw_json"])
+                except Exception:
+                    merged_payload = {}
+                merged_payload.update({k: v for k, v in payload.items() if v is not None})
+                payload = merged_payload
+                created_at = payload.get("created_at") or created_at
+
             conn.execute(
                 """
                 INSERT OR REPLACE INTO signal_events(
@@ -489,9 +955,9 @@ class Storage:
                 (
                     signal_key,
                     str(message_id or ""),
-                    symbol,
-                    side,
-                    source,
+                    payload.get("symbol"),
+                    payload.get("side"),
+                    payload.get("source") or source,
                     created_at,
                     json.dumps(payload),
                 ),
@@ -549,6 +1015,35 @@ class Storage:
 
         return [json.loads(row["raw_json"]) for row in rows]
 
+    def get_latest_signal_message_id(self):
+        latest = 0
+
+        conn = self._db_connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT message_id
+                FROM signal_events
+                WHERE message_id IS NOT NULL AND message_id != ''
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+
+        for row in rows:
+            try:
+                latest = max(latest, int(row["message_id"]))
+            except Exception:
+                continue
+
+        for trade in self.get_all_trades():
+            try:
+                latest = max(latest, int(trade.get("message_id") or 0))
+            except Exception:
+                continue
+
+        return latest
+
     def _backfill_signal_events_from_trades(self):
         conn = self._db_connect()
         try:
@@ -557,7 +1052,7 @@ class Storage:
                 return
 
             rows = []
-            for trade in self.data.values():
+            for trade in self.get_all_trades():
                 if not isinstance(trade, dict):
                     continue
                 message_id = trade.get("message_id")
@@ -571,7 +1066,7 @@ class Storage:
                     "source": "telegram",
                     "created_at": created_at,
                     "status": "accepted",
-                    "backfilled_from": "trades.json",
+                    "backfilled_from": "legacy_trade_storage",
                 }
                 rows.append((
                     str(message_id),
@@ -599,7 +1094,7 @@ class Storage:
     def _backfill_signal_event_statuses_from_trades(self):
         message_ids = {
             str(trade.get("message_id"))
-            for trade in self.data.values()
+            for trade in self.get_all_trades()
             if isinstance(trade, dict) and trade.get("message_id") not in (None, "")
         }
         if not message_ids:
@@ -630,7 +1125,7 @@ class Storage:
 
                 payload["status"] = "accepted"
                 if "backfilled_from" not in payload:
-                    payload["backfilled_from"] = "trades.json"
+                    payload["backfilled_from"] = "legacy_trade_storage"
                 updates.append((json.dumps(payload), row["signal_key"]))
 
             if updates:
@@ -644,18 +1139,18 @@ class Storage:
 
     def get_all_trades(self):
         with self.lock:
-            return [dict(trade) for trade in self.data.values() if isinstance(trade, dict)]
+            return [dict(trade) for trade in self._query_bot_trades()]
 
     def get_active_trades(self):
         with self.lock:
             return [
-                dict(t) for t in self.data.values()
+                dict(t) for t in self._query_bot_trades()
                 if isinstance(t, dict) and t.get("status") in ["PENDING", "FILLED"]
             ]
 
     def find_active_by_symbol(self, symbol):
         with self.lock:
-            for t in self.data.values():
+            for t in self._query_bot_trades("WHERE symbol = ?", (symbol,)):
                 if isinstance(t, dict) and t.get("symbol") == symbol and t.get("status") != "CLOSED":
                     return dict(t)
             return None
@@ -663,7 +1158,7 @@ class Storage:
     def find_last_by_symbol(self, symbol):
         with self.lock:
             trades = [
-                dict(t) for t in self.data.values()
+                dict(t) for t in self._query_bot_trades("WHERE symbol = ?", (symbol,))
                 if isinstance(t, dict) and t.get("symbol") == symbol
             ]
 
@@ -674,7 +1169,7 @@ class Storage:
 
     def find_by_message_id(self, message_id):
         with self.lock:
-            for t in self.data.values():
+            for t in self._query_bot_trades("WHERE message_id = ?", (str(message_id),)):
                 if (
                     isinstance(t, dict)
                     and t.get("message_id") == message_id
@@ -685,7 +1180,7 @@ class Storage:
 
     def close_trade(self, trade_id, exit_price, pnl, reason):
         with self.lock:
-            trade = self.data.get(trade_id)
+            trade = self.get_trade(trade_id)
 
             if not isinstance(trade, dict):
                 return False
@@ -704,15 +1199,16 @@ class Storage:
                 "updated_at": datetime.utcnow().isoformat()
             })
 
-            self.save()
-            self._append_to_report(dict(trade))
+            self._upsert_bot_trade(trade)
             return True
 
     def delete_trade(self, trade_id):
-        with self.lock:
-            if trade_id in self.data:
-                del self.data[trade_id]
-                self.save()
+        conn = self._db_connect()
+        try:
+            conn.execute("DELETE FROM bot_trades WHERE trade_id = ?", (str(trade_id),))
+            conn.commit()
+        finally:
+            conn.close()
 
     def record_balance_snapshot(self, summary, captured_at=None):
         with self.lock:
@@ -731,7 +1227,7 @@ class Storage:
                 "equity": round(equity, 8),
             }
 
-            last = self.balance_history[-1] if self.balance_history else None
+            last = self._get_last_balance_snapshot()
             if last:
                 same_values = (
                     abs(float(last.get("wallet_balance", 0.0) or 0.0) - snapshot["wallet_balance"]) < 1e-9
@@ -739,18 +1235,25 @@ class Storage:
                     and abs(float(last.get("equity", 0.0) or 0.0) - snapshot["equity"]) < 1e-9
                 )
                 if same_values:
-                    last["captured_at"] = captured_at
-                    self.save_balance_history()
+                    snapshot["captured_at"] = captured_at
+                    self._upsert_balance_snapshot(snapshot)
                     return
 
-            self.balance_history.append(snapshot)
-            if len(self.balance_history) > BALANCE_HISTORY_LIMIT:
-                self.balance_history = self.balance_history[-BALANCE_HISTORY_LIMIT:]
-            self.save_balance_history()
+            self._upsert_balance_snapshot(snapshot)
 
     def get_balance_history(self):
-        with self.lock:
-            return [dict(item) for item in self.balance_history if isinstance(item, dict)]
+        conn = self._db_connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT raw_json
+                FROM balance_snapshots
+                ORDER BY captured_at ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [json.loads(row["raw_json"]) for row in rows]
 
     def _transaction_event_key(self, item):
         return "|".join([
@@ -766,32 +1269,9 @@ class Storage:
 
     def record_transaction_events(self, events, **meta_updates):
         with self.lock:
-            existing = {
-                self._transaction_event_key(item): dict(item)
-                for item in self.transaction_history
-                if isinstance(item, dict)
-            }
-
-            for item in events or []:
-                if not isinstance(item, dict):
-                    continue
-                existing[self._transaction_event_key(item)] = dict(item)
-
-            self.transaction_history = sorted(
-                existing.values(),
-                key=lambda item: (
-                    int(item.get("transaction_time", 0) or 0),
-                    str(item.get("id") or ""),
-                ),
-            )
-
-            if len(self.transaction_history) > TRANSACTION_HISTORY_LIMIT:
-                self.transaction_history = self.transaction_history[-TRANSACTION_HISTORY_LIMIT:]
-
             for key, value in meta_updates.items():
                 self.transaction_history_meta[key] = value
 
-            self.save_transaction_history()
             self._upsert_transaction_events_to_db(events or [])
             self._save_sync_state_to_db()
 

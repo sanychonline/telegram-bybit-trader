@@ -12,11 +12,18 @@ class BybitClient:
     EXECUTION_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
     EXECUTION_HISTORY_RETENTION_MS = 730 * 24 * 60 * 60 * 1000
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, storage=None):
+        testnet = BYBIT_TESTNET
+        api_key = BYBIT_API_KEY
+        api_secret = BYBIT_API_SECRET
+        if storage is not None:
+            testnet = bool(storage.get_app_setting("bybit_testnet", BYBIT_TESTNET))
+            api_key = storage.get_app_secret("bybit_api_key", BYBIT_API_KEY)
+            api_secret = storage.get_app_secret("bybit_api_secret", BYBIT_API_SECRET)
         self.client = HTTP(
-            testnet=BYBIT_TESTNET,
-            api_key=BYBIT_API_KEY,
-            api_secret=BYBIT_API_SECRET
+            testnet=testnet,
+            api_key=api_key,
+            api_secret=api_secret,
         )
         self.logger = logger
         self.instrument_cache = {}

@@ -24,8 +24,8 @@ async def main():
     bot_logger = get_source_logger(base_logger, "Bot")
     telegram_logger = get_source_logger(base_logger, "Telegram")
 
-    bybit = BybitClient(logger=bot_logger)
     storage = Storage()
+    bybit = BybitClient(logger=bot_logger, storage=storage)
     execution = ExecutionService(bybit, storage, bot_logger)
 
     worker = Worker(bybit, storage, execution, bot_logger)
@@ -33,14 +33,15 @@ async def main():
 
     reconciliation = Reconciliation(bybit, storage, bot_logger)
 
-    telegram = TelegramService(worker, telegram_logger)
+    telegram = TelegramService(worker, telegram_logger, storage=storage)
     dashboard = DashboardService(bybit, storage, bot_logger) if DASHBOARD_ENABLED else None
+    last_settings_revision = storage.get_settings_revision()
     bot_logger.info("Bot started")
 
     async def heartbeat_loop():
         while True:
             try:
-                await asyncio.to_thread(touch, "app")
+                await asyncio.to_thread(touch, "app", telegram_enabled=telegram.is_enabled)
                 await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
             except Exception as e:
                 bot_logger.error(f"Heartbeat error: {e}")
@@ -51,6 +52,11 @@ async def main():
         last_transaction_sync_at = 0.0
         while True:
             try:
+                current_settings_revision = storage.get_settings_revision()
+                if current_settings_revision and current_settings_revision != last_settings_revision:
+                    bot_logger.warning("Settings changed; restarting bot to apply updates")
+                    raise SystemExit(0)
+
                 await asyncio.to_thread(bybit.ping)
                 await asyncio.to_thread(reconciliation.sync)
                 now = time.monotonic()
@@ -70,10 +76,14 @@ async def main():
 
     tasks = [
         heartbeat_loop(),
-        telegram.start(),
         watcher.watch(),
         sync_loop(),
     ]
+
+    if telegram.is_enabled:
+        tasks.append(telegram.start())
+    else:
+        bot_logger.warning("Telegram task disabled; running without Telegram integration")
 
     if dashboard:
         tasks.append(dashboard.run())

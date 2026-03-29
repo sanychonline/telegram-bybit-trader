@@ -6,9 +6,13 @@ class ExecutionService:
         self.bybit = bybit
         self.storage = storage
         self.logger = logger
-        self.MAX_POSITION_MULTIPLIER = MAX_POSITION_MULTIPLIER
-        self.MAX_ENTRY_DEVIATION_PCT = MAX_ENTRY_DEVIATION_PCT
         self.last_reject_reason = "execution_rejected"
+
+    def _max_position_multiplier(self):
+        return float(self.storage.get_app_setting("max_position_multiplier", MAX_POSITION_MULTIPLIER))
+
+    def _max_entry_deviation_pct(self):
+        return float(self.storage.get_app_setting("max_entry_deviation_pct", MAX_ENTRY_DEVIATION_PCT))
 
     def calculate_rr(self, entry, sl, tp, side):
         if side == "LONG":
@@ -59,7 +63,7 @@ class ExecutionService:
             return None
 
         raw_qty = risk_amount / distance
-        max_notional = balance * self.MAX_POSITION_MULTIPLIER
+        max_notional = balance * self._max_position_multiplier()
 
         try:
             max_qty_by_notional = self.bybit.normalize_qty(symbol, max_notional / entry)
@@ -114,10 +118,10 @@ class ExecutionService:
 
         if side == "LONG":
             deviation = (market_price - entry) / entry
-            too_far = market_price > entry and deviation >= self.MAX_ENTRY_DEVIATION_PCT
+            too_far = market_price > entry and deviation >= self._max_entry_deviation_pct()
         else:
             deviation = (entry - market_price) / entry
-            too_far = market_price < entry and deviation >= self.MAX_ENTRY_DEVIATION_PCT
+            too_far = market_price < entry and deviation >= self._max_entry_deviation_pct()
 
         return too_far, market_price, deviation
 

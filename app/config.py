@@ -17,25 +17,29 @@ def get_env(name, default=None, required=False, cast=None):
 
 
 DATA_DIR = get_env("DATA_DIR", "/opt/bot/data")
-DATA_CACHES_DIR = f"{DATA_DIR}/caches"
-DATA_REPORTS_DIR = f"{DATA_DIR}/reports"
-DATA_STORAGE_DIR = f"{DATA_DIR}/storage"
+
+DATA_TRADES_PATH = f"{DATA_DIR}/trades.json"
+DATA_BALANCE_HISTORY_PATH = f"{DATA_DIR}/balance_history.json"
+DATA_TRANSACTION_HISTORY_PATH = f"{DATA_DIR}/transaction_history.json"
+DATA_HISTORY_DB_PATH = f"{DATA_DIR}/history.sqlite3"
+DATA_SECRETS_KEY_PATH = f"{DATA_DIR}/secrets.key"
+DATA_HEALTHCHECK_PATH = f"{DATA_DIR}/healthcheck.json"
+DATA_TELEGRAM_SESSION_PATH = f"{DATA_DIR}/session"
+DATA_BOT_LOG_PATH = f"{DATA_DIR}/bot.log"
 
 TZ = get_env("TZ", "UTC")
-BRAND_NAME = get_env("BRAND_NAME", required=True)
-DISCLAIMER_TEXT = get_env("DISCLAIMER_TEXT", required=True)
 LOG_TO_FILE = get_env("LOG_TO_FILE", "false").lower() == "true"
 LOG_LEVEL = get_env("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = get_env("LOG_MAX_BYTES", 20 * 1024 * 1024, cast=int)
 LOG_BACKUP_COUNT = get_env("LOG_BACKUP_COUNT", 10, cast=int)
 
-BYBIT_API_KEY = get_env("BYBIT_API_KEY", required=True)
-BYBIT_API_SECRET = get_env("BYBIT_API_SECRET", required=True)
+BYBIT_API_KEY = get_env("BYBIT_API_KEY")
+BYBIT_API_SECRET = get_env("BYBIT_API_SECRET")
 BYBIT_TESTNET = get_env("BYBIT_TESTNET", "true").lower() == "true"
 
-TELEGRAM_API_ID = get_env("TELEGRAM_API_ID", required=True, cast=int)
-TELEGRAM_API_HASH = get_env("TELEGRAM_API_HASH", required=True)
-TELEGRAM_CHAT_ID = get_env("TELEGRAM_CHAT_ID", required=True, cast=int)
+TELEGRAM_API_ID = get_env("TELEGRAM_API_ID", cast=int)
+TELEGRAM_API_HASH = get_env("TELEGRAM_API_HASH")
+TELEGRAM_CHAT_ID = get_env("TELEGRAM_CHAT_ID", cast=int)
 
 DASHBOARD_ENABLED = get_env("DASHBOARD_ENABLED", "false").lower() == "true"
 DASHBOARD_HOST = get_env("DASHBOARD_HOST", "0.0.0.0")

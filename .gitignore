@@ -13,15 +13,4 @@ htmlcov/
 *.sqlite3
 *.sqlite3-*
 data/*
-!data/caches/
-data/caches/*
-!data/caches/README.md
-!data/reports/
-data/reports/*
-!data/reports/README.md
-!data/storage/
-data/storage/*
-!data/storage/README.md
-data/*.log
-data/*.csv
-data/*.json
+!data/README.md
