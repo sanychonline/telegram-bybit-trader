@@ -122,11 +122,12 @@ def build_trader_dashboard_js(refresh_ms):
           <span class="signal-chip">
             <span class="signal-emoji">${{emoji}}</span>
             <span class="signal-time">${{when}}</span>
-            ${{marker ? `<span class="signal-sep">${{marker}}</span>` : ''}}
             <span class="signal-pair">${{pair}}</span>
+            ${{marker ? `<span class="signal-reaction">${{marker}}</span>` : ''}}
+            <span class="signal-sep signal-sep-inline">|</span>
           </span>
         `;
-      }}).join('<span class="signal-sep signal-sep-outer">|</span>');
+      }}).join('');
 
       return `
         <div class="signal-marquee" aria-label="${{tr('Last Signal')}}">

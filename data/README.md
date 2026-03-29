@@ -3,15 +3,12 @@
 This directory stores all runtime state for `trader-bot` directly in the root.
 
 Typical files:
-- `history.sqlite3`
+- `traderbot.sqlite3`
 - `secrets.key`
 - `healthcheck.json`
 - `session.session`
 - `session.session-journal`
 - `bot.log`
-- `trades.json`
-- `balance_history.json`
-- `transaction_history.json`
 
 What goes here:
 - SQLite storage for local bot trade state, balance snapshots, signal events, exchange sync history, runtime settings, and encrypted secrets;
@@ -33,5 +30,5 @@ What to do with it:
 
 Git hygiene:
 - `data/*` is ignored by the repository except for this README;
-- do not add `history.sqlite3`, `secrets.key`, `*.session`, or logs to commits;
+- do not add `traderbot.sqlite3`, `secrets.key`, `*.session`, or logs to commits;
 - if you need to export state, do it outside the repository tree.

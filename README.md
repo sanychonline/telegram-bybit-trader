@@ -123,17 +123,13 @@ The dashboard also includes a live signal ticker:
 - shows `😢` if the related trade closed in loss
 - keeps the ticker moving right-to-left in a continuous loop
 
+The dashboard theme toggle follows the system `prefers-color-scheme` setting in real time when `auto` is selected.
+
 ## Data Directory Guide
 
 `data`
-- `history.sqlite3`
+- `traderbot.sqlite3`
   - primary local storage for bot trades, signal events, exchange sync history, balance snapshots, runtime settings, and encrypted secrets metadata
-- `trades.json`
-  - legacy-compatible trade state snapshot used by the storage layer
-- `balance_history.json`
-  - exchange-backed balance history exported for the dashboard
-- `transaction_history.json`
-  - exchange-backed transaction history exported for the dashboard
 - `secrets.key`
   - local encryption key for app secrets stored in SQLite
 - `healthcheck.json`

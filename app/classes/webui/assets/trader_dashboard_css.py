@@ -137,6 +137,10 @@ TRADER_DASHBOARD_CSS = r"""
       padding: 0 10px;
       font-weight: 600;
     }
+    .signal-sep-inline {
+      padding-left: 10px;
+      padding-right: 10px;
+    }
     .signal-sep-outer {
       color: color-mix(in srgb, var(--muted) 80%, var(--text));
     }
@@ -156,6 +160,11 @@ TRADER_DASHBOARD_CSS = r"""
       line-height: 1;
       display: inline-flex;
       align-items: center;
+    }
+    .signal-reaction {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 6px;
     }
     .signal-emoji {
       font-size: 14px;
