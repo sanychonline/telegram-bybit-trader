@@ -1,4 +1,5 @@
 import os
+import secrets
 
 
 def get_env(name, default=None, required=False, cast=None):
@@ -40,6 +41,7 @@ BYBIT_TESTNET = get_env("BYBIT_TESTNET", "true").lower() == "true"
 TELEGRAM_API_ID = get_env("TELEGRAM_API_ID", cast=int)
 TELEGRAM_API_HASH = get_env("TELEGRAM_API_HASH")
 TELEGRAM_CHAT_ID = get_env("TELEGRAM_CHAT_ID", cast=int)
+INTERNAL_API_TOKEN = get_env("INTERNAL_API_TOKEN", secrets.token_urlsafe(32))
 
 DASHBOARD_ENABLED = get_env("DASHBOARD_ENABLED", "false").lower() == "true"
 DASHBOARD_HOST = get_env("DASHBOARD_HOST", "0.0.0.0")

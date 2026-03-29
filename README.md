@@ -138,6 +138,16 @@ The Telegram sync state is tracked in SQLite too:
 - `telegram.history_sync.processed_count`
 The startup sync is user-session aware, while live Telegram runtime keeps running through the configured integration once settings are complete.
 
+## Internal Backtest API
+
+`trader-bot` exposes bearer-protected read-only endpoints for workspace tooling:
+- `GET /api/backtest/signal-events`
+- `GET /api/backtest/exchange-closed-trades`
+- `GET /api/backtest/bot-trades`
+
+All three endpoints require the shared `internal_api_token` stored in `app_secrets` and sent as `Authorization: Bearer <token>`.
+The token itself is managed in the dashboard settings and persisted encrypted in SQLite.
+
 ## Data Directory Guide
 
 `data`

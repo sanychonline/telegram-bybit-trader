@@ -63,6 +63,31 @@ class DashboardService:
             },
         }
 
+    def _backtest_bearer_token(self):
+        try:
+            return str(self.storage.get_app_secret("internal_api_token", "") or "").strip()
+        except Exception:
+            return ""
+
+    def _is_backtest_authorized(self, headers):
+        expected = self._backtest_bearer_token()
+        if not expected:
+            return True
+        auth = str(headers.get("Authorization") or "").strip()
+        return auth == f"Bearer {expected}"
+
+    def _send_json(self, handler, code, payload, headers=None):
+        body = json.dumps(payload).encode("utf-8")
+        handler.send_response(code)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        if headers:
+            for key, value in headers.items():
+                handler.send_header(key, value)
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+
     def _make_handler(self):
         service = self
 
@@ -128,6 +153,54 @@ class DashboardService:
                     self.send_header("Content-Length", str(len(payload)))
                     self.end_headers()
                     self.wfile.write(payload)
+                    return
+
+                if path_only == "/api/backtest/exchange-closed-trades":
+                    if not service._is_backtest_authorized(self.headers):
+                        service._send_json(
+                            self,
+                            401,
+                            {"ok": False, "error": "unauthorized"},
+                            headers={"WWW-Authenticate": 'Bearer realm="trader-bot-backtest"'},
+                        )
+                        return
+                    payload = {
+                        "ok": True,
+                        "exchange_closed_trades": service.storage.get_exchange_closed_trades(source="exchange_closed_pnl"),
+                    }
+                    service._send_json(self, 200, payload)
+                    return
+
+                if path_only == "/api/backtest/bot-trades":
+                    if not service._is_backtest_authorized(self.headers):
+                        service._send_json(
+                            self,
+                            401,
+                            {"ok": False, "error": "unauthorized"},
+                            headers={"WWW-Authenticate": 'Bearer realm="trader-bot-backtest"'},
+                        )
+                        return
+                    payload = {
+                        "ok": True,
+                        "bot_trades": service.storage.get_all_trades(),
+                    }
+                    service._send_json(self, 200, payload)
+                    return
+
+                if path_only == "/api/backtest/signal-events":
+                    if not service._is_backtest_authorized(self.headers):
+                        service._send_json(
+                            self,
+                            401,
+                            {"ok": False, "error": "unauthorized"},
+                            headers={"WWW-Authenticate": 'Bearer realm="trader-bot-backtest"'},
+                        )
+                        return
+                    payload = {
+                        "ok": True,
+                        "signal_events": service.storage.get_signal_events(),
+                    }
+                    service._send_json(self, 200, payload)
                     return
 
                 if path_only == "/health":

@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 from datetime import datetime, timezone, timedelta
 from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_CHAT_ID, DATA_TELEGRAM_SESSION_PATH
 from classes.reporting.health_state import touch
@@ -42,6 +43,128 @@ class TelegramService:
         self.startup_last_message_id = 0
         self.seen_message_ids = set()
 
+    def _history_sync_storage(self):
+        if self.worker and getattr(self.worker, "storage", None) is not None:
+            return self.worker.storage
+        return None
+
+    async def sync_chat_history(self, storage=None):
+        storage = storage or self._history_sync_storage()
+        if storage is None:
+            return 0
+
+        sync_key = "telegram.history_sync"
+        storage.update_named_sync_state(
+            sync_key,
+            status="running",
+            started_at=datetime.utcnow().isoformat(),
+            mode="user",
+        )
+
+        if not self.is_enabled or self.client is None:
+            storage.update_named_sync_state(
+                sync_key,
+                status="unavailable",
+                message="Telegram client is not configured",
+                finished_at=datetime.utcnow().isoformat(),
+            )
+            return 0
+
+        started_here = False
+        backlog_messages = []
+        processed = 0
+        synced = 0
+        last_status_log_at = time.monotonic()
+        try:
+            if not self.client.is_connected():
+                await self.client.start()
+                started_here = True
+
+            if not await self.client.is_user_authorized():
+                raise Exception("Telegram session is not authorized")
+
+            self.startup_last_message_id = int(storage.get_latest_telegram_message_id() or 0)
+            self.logger.info(
+                f"Telegram history sync started | last_known_message_id={self.startup_last_message_id}"
+            )
+
+            async for message in self.client.iter_messages(self.chat_id, limit=None):
+                message_id = getattr(message, "id", 0) or 0
+                if message_id <= self.startup_last_message_id:
+                    break
+                backlog_messages.append(message)
+                storage.record_telegram_message(
+                    message_id,
+                    kind="history",
+                    source="telegram_history_sync",
+                )
+                synced += 1
+                now = time.monotonic()
+                if now - last_status_log_at >= 5:
+                    self.logger.info(
+                        f"Telegram history sync running | synced={synced} | processed={processed} | status=inventory"
+                    )
+                    last_status_log_at = now
+
+            total = len(backlog_messages)
+            self.logger.info(f"Telegram history sync inventory complete | message_count={total}")
+
+            progress_step = max(1, total // 20) if total else 1
+            for index, message in enumerate(reversed(backlog_messages), start=1):
+                await self._process_message(message, source="telegram_backfill")
+                processed += 1
+                storage.update_named_sync_state(
+                    sync_key,
+                    status="running",
+                    last_message_id=self.startup_last_message_id,
+                    synced_count=synced,
+                    processed_count=processed,
+                    inventory_count=total,
+                    progress_pct=int((processed / total) * 100) if total else 100,
+                    updated_at=datetime.utcnow().isoformat(),
+                )
+                now = time.monotonic()
+                if now - last_status_log_at >= 5:
+                    percent = int((processed / total) * 100) if total else 100
+                    self.logger.info(
+                        f"Telegram history sync running | processed={processed}/{total} ({percent}%) | synced={synced}"
+                    )
+                    last_status_log_at = now
+                if total and (processed == total or processed % progress_step == 0):
+                    percent = int((processed / total) * 100)
+                    self.logger.info(
+                        f"Telegram history sync progress | processed={processed}/{total} ({percent}%)"
+                    )
+
+            storage.update_named_sync_state(
+                sync_key,
+                status="completed",
+                last_message_id=self.startup_last_message_id,
+                synced_count=synced,
+                processed_count=processed,
+                inventory_count=total,
+                finished_at=datetime.utcnow().isoformat(),
+            )
+            self.logger.info(
+                f"Telegram history sync completed | synced_messages={synced} | processed_messages={processed}"
+            )
+            return processed
+        except Exception as exc:
+            storage.update_named_sync_state(
+                sync_key,
+                status="failed",
+                error=str(exc),
+                finished_at=datetime.utcnow().isoformat(),
+            )
+            self.logger.error(f"Telegram history sync failed: {exc}")
+            raise
+        finally:
+            if started_here:
+                try:
+                    await self.client.disconnect()
+                except Exception:
+                    pass
+
     async def _mark_seen(self, message_id):
         if message_id is None:
             return False
@@ -54,6 +177,14 @@ class TelegramService:
         message_id = getattr(message, "id", None)
         if message_id is None:
             return
+
+        storage = self._history_sync_storage()
+        if storage is not None:
+            storage.record_telegram_message(
+                message_id,
+                kind=source,
+                source=source,
+            )
 
         if message_id <= self.startup_last_message_id:
             self.logger.debug(f"Telegram message ignored as stale | message_id={message_id}")
@@ -115,30 +246,16 @@ class TelegramService:
 
         await self.client.start()
         self.is_ready = True
-        stored_last_message_id = 0
-        if self.worker and getattr(self.worker, "storage", None) is not None:
+        storage = self._history_sync_storage()
+        if storage is not None:
             try:
-                stored_last_message_id = int(self.worker.storage.get_latest_signal_message_id() or 0)
-            except Exception:
-                stored_last_message_id = 0
-
-        self.startup_last_message_id = stored_last_message_id
-        backlog_messages = []
-        async for message in self.client.iter_messages(self.chat_id, limit=100):
-            message_id = getattr(message, "id", 0) or 0
-            if message_id <= self.startup_last_message_id:
-                break
-            backlog_messages.append(message)
-
-        for message in reversed(backlog_messages):
-            await self._process_message(message, source="telegram_backfill")
+                await self.sync_chat_history(storage)
+            except Exception as exc:
+                self.logger.warning(f"Telegram history sync skipped or incomplete: {exc}")
 
         touch("telegram")
         self.logger.info("Telegram client started")
-        self.logger.debug(
-            f"Telegram startup state | startup_last_message_id={self.startup_last_message_id} "
-            f"| backlog_processed={len(backlog_messages)}"
-        )
+        self.logger.debug(f"Telegram startup state | startup_last_message_id={self.startup_last_message_id}")
 
         async def keepalive_loop():
             while True:

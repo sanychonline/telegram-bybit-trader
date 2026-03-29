@@ -22,6 +22,7 @@ from config import (
     TELEGRAM_API_ID,
     TELEGRAM_API_HASH,
     TELEGRAM_CHAT_ID,
+    INTERNAL_API_TOKEN,
     DASHBOARD_REFRESH_SEC,
     MAX_POSITION_MULTIPLIER,
     MAX_ENTRY_DEVIATION_PCT,
@@ -48,6 +49,7 @@ APP_SECRETS_SCHEMA = {
     "bybit_api_secret": {"type": "str", "default": BYBIT_API_SECRET},
     "telegram_api_id": {"type": "int", "default": TELEGRAM_API_ID},
     "telegram_api_hash": {"type": "str", "default": TELEGRAM_API_HASH},
+    "internal_api_token": {"type": "str", "default": INTERNAL_API_TOKEN},
 }
 
 
@@ -255,6 +257,16 @@ class Storage:
                     );
                     CREATE INDEX IF NOT EXISTS idx_signal_created_at
                     ON signal_events(created_at);
+                    CREATE TABLE IF NOT EXISTS telegram_message_registry (
+                        message_id TEXT PRIMARY KEY,
+                        kind TEXT,
+                        trade_id TEXT,
+                        source TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_telegram_message_registry_updated
+                    ON telegram_message_registry(updated_at);
                     CREATE TABLE IF NOT EXISTS bot_trades (
                         trade_id TEXT PRIMARY KEY,
                         symbol TEXT,
@@ -367,6 +379,7 @@ class Storage:
         self._seed_app_secrets()
         self._backfill_signal_events_from_trades()
         self._backfill_signal_event_statuses_from_trades()
+        self._backfill_telegram_registry_from_existing_data()
 
     def _save_sync_state_to_db(self):
         if not self.transaction_history_meta:
@@ -439,6 +452,102 @@ class Storage:
                 "INSERT OR REPLACE INTO sync_state(key, value) VALUES(?, ?)",
                 rows,
             )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_telegram_message_ids(self):
+        conn = self._db_connect()
+        try:
+            registry_rows = conn.execute(
+                """
+                SELECT message_id
+                FROM telegram_message_registry
+                WHERE message_id IS NOT NULL AND message_id != ''
+                """
+            ).fetchall()
+            signal_rows = conn.execute(
+                """
+                SELECT message_id
+                FROM signal_events
+                WHERE message_id IS NOT NULL AND message_id != ''
+                """
+            ).fetchall()
+            trade_rows = conn.execute(
+                """
+                SELECT message_id
+                FROM bot_trades
+                WHERE message_id IS NOT NULL AND message_id != ''
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+
+        message_ids = set()
+        for rows in (registry_rows, signal_rows, trade_rows):
+            for row in rows:
+                try:
+                    message_ids.add(int(row["message_id"]))
+                except Exception:
+                    continue
+        return message_ids
+
+    def get_latest_telegram_message_id(self):
+        latest = 0
+        for message_id in self.get_telegram_message_ids():
+            try:
+                latest = max(latest, int(message_id))
+            except Exception:
+                continue
+        return latest
+
+    def record_telegram_message(self, message_id, kind=None, trade_id=None, source=None):
+        if message_id in (None, ""):
+            return None
+
+        try:
+            message_id = int(message_id)
+        except Exception:
+            return None
+
+        now = datetime.utcnow().isoformat()
+        conn = self._db_connect()
+        try:
+            existing = conn.execute(
+                """
+                SELECT created_at
+                FROM telegram_message_registry
+                WHERE message_id = ?
+                LIMIT 1
+                """,
+                (str(message_id),),
+            ).fetchone()
+            created_at = existing["created_at"] if existing else now
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO telegram_message_registry(
+                    message_id, kind, trade_id, source, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(message_id),
+                    kind,
+                    str(trade_id) if trade_id not in (None, "") else None,
+                    source,
+                    created_at,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return message_id
+
+    def clear_telegram_message_registry(self):
+        conn = self._db_connect()
+        try:
+            conn.execute("DELETE FROM telegram_message_registry")
             conn.commit()
         finally:
             conn.close()
@@ -966,6 +1075,13 @@ class Storage:
         finally:
             conn.close()
 
+        if message_id not in (None, ""):
+            self.record_telegram_message(
+                message_id,
+                kind=str(payload.get("status") or "signal").strip().lower() or "signal",
+                source=payload.get("source") or source,
+            )
+
     def update_signal_event(self, message_id, updates):
         if message_id in (None, "") or not isinstance(updates, dict) or not updates:
             return
@@ -1132,6 +1248,64 @@ class Storage:
                 conn.executemany(
                     "UPDATE signal_events SET raw_json = ? WHERE signal_key = ?",
                     updates,
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+    def _backfill_telegram_registry_from_existing_data(self):
+        conn = self._db_connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT message_id, source, created_at
+                FROM signal_events
+                WHERE message_id IS NOT NULL AND message_id != ''
+                """
+            ).fetchall()
+            trade_rows = conn.execute(
+                """
+                SELECT message_id, created_at
+                FROM bot_trades
+                WHERE message_id IS NOT NULL AND message_id != ''
+                """
+            ).fetchall()
+
+            now = datetime.utcnow().isoformat()
+            inserts = []
+            for row in rows:
+                message_id = str(row["message_id"] or "").strip()
+                if not message_id:
+                    continue
+                inserts.append((
+                    message_id,
+                    "signal",
+                    None,
+                    row["source"] or "signal_events",
+                    row["created_at"] or now,
+                    now,
+                ))
+            for row in trade_rows:
+                message_id = str(row["message_id"] or "").strip()
+                if not message_id:
+                    continue
+                inserts.append((
+                    message_id,
+                    "trade",
+                    None,
+                    "bot_trades",
+                    row["created_at"] or now,
+                    now,
+                ))
+
+            if inserts:
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO telegram_message_registry(
+                        message_id, kind, trade_id, source, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    inserts,
                 )
                 conn.commit()
         finally:

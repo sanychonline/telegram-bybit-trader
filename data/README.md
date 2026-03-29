@@ -13,6 +13,7 @@ Typical files:
 What goes here:
 - SQLite storage for local bot trade state, balance snapshots, signal events, exchange sync history, runtime settings, and encrypted secrets;
 - Telegram message registry and history sync metadata used for startup backfill and cleanup;
+- `internal_api_token` in `app_secrets` - bearer token for workspace backtest and other internal API reads;
 - local encryption key for app secrets;
 - healthcheck timestamps;
 - Telethon session files;

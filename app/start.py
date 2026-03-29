@@ -36,7 +36,18 @@ async def main():
     telegram = TelegramService(worker, telegram_logger, storage=storage)
     dashboard = DashboardService(bybit, storage, bot_logger) if DASHBOARD_ENABLED else None
     last_settings_revision = storage.get_settings_revision()
+    runtime_ready = bool(getattr(bybit, "client", None) is not None and telegram.is_enabled)
+    restart_requested = asyncio.Event()
     bot_logger.info("Bot started")
+    if not runtime_ready:
+        bot_logger.warning(
+            "Bot is paused because required settings are incomplete; fill Bybit and Telegram settings in the UI to start runtime"
+        )
+        touch(
+            "app",
+            telegram_enabled=telegram.is_enabled,
+            scanner_enabled=False,
+        )
 
     async def heartbeat_loop():
         while True:
@@ -52,10 +63,14 @@ async def main():
         last_transaction_sync_at = 0.0
         while True:
             try:
+                if not runtime_ready:
+                    await asyncio.sleep(SYNC_LOOP_INTERVAL_SEC)
+                    continue
                 current_settings_revision = storage.get_settings_revision()
                 if current_settings_revision and current_settings_revision != last_settings_revision:
                     bot_logger.warning("Settings changed; restarting bot to apply updates")
-                    raise SystemExit(0)
+                    restart_requested.set()
+                    return
 
                 await asyncio.to_thread(bybit.ping)
                 await asyncio.to_thread(reconciliation.sync)
@@ -75,21 +90,31 @@ async def main():
                 await asyncio.sleep(SYNC_LOOP_INTERVAL_SEC)
 
     tasks = [
-        heartbeat_loop(),
-        watcher.watch(),
-        sync_loop(),
+        asyncio.create_task(heartbeat_loop()),
     ]
 
-    if telegram.is_enabled:
-        tasks.append(telegram.start())
+    if runtime_ready:
+        tasks.append(asyncio.create_task(watcher.watch()))
+        tasks.append(asyncio.create_task(sync_loop()))
     else:
-        bot_logger.warning("Telegram task disabled; running without Telegram integration")
+        bot_logger.warning("Trading runtime is paused until the UI settings are completed")
+
+    if telegram.is_enabled and runtime_ready:
+        tasks.append(asyncio.create_task(telegram.start()))
+    else:
+        if not telegram.is_enabled:
+            bot_logger.warning("Telegram task disabled; running without Telegram integration")
 
     if dashboard:
-        tasks.append(dashboard.run())
+        tasks.append(asyncio.create_task(dashboard.run()))
         bot_logger.info("Dashboard enabled")
 
-    await asyncio.gather(*tasks)
+    await restart_requested.wait()
+
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    return
 
 
 if __name__ == "__main__":
