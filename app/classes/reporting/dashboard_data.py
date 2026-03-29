@@ -10,7 +10,7 @@ class DashboardDataService:
         self.storage = storage
         self.local_tz = ZoneInfo(TZ)
 
-    def _closed_summary(self, trades):
+    def _closed_summary_exchange(self, trades):
         wins = 0
         losses = 0
         breakevens = 0
@@ -18,11 +18,8 @@ class DashboardDataService:
         closed_rows = []
 
         for trade in trades:
-            if trade.get("status") != "CLOSED":
-                continue
-
             pnl = float(trade.get("pnl", 0) or 0)
-            reason = trade.get("close_reason") or trade.get("exit_reason")
+            reason = trade.get("close_reason")
             realized += pnl
 
             if pnl > 0:
@@ -38,7 +35,7 @@ class DashboardDataService:
                 "reason": reason,
                 "tp_hits": int(trade.get("tp_hits", 0) or 0),
                 "pnl": round(pnl, 4),
-                "updated_at": trade.get("updated_at"),
+                "updated_at": trade.get("closed_at") or trade.get("updated_at"),
             })
 
         closed_rows.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
@@ -75,16 +72,24 @@ class DashboardDataService:
             )
         return None, None
 
-    def _filter_closed_trades(self, trades, range_key):
+    def _filter_exchange_closed_trades(self, trades, range_key):
         start, end = self._range_bounds(range_key)
         if start is None and end is None:
-            return [trade for trade in trades if trade.get("status") == "CLOSED"]
+            return list(trades)
+
         filtered = []
         for trade in trades:
-            if trade.get("status") != "CLOSED":
+            raw = trade.get("closed_at") or trade.get("updated_at")
+            if not raw:
                 continue
-            dt = self._parse_trade_time(trade)
-            if dt is None:
+            try:
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                dt = dt.astimezone(self.local_tz)
+            except Exception:
                 continue
             if start is not None and dt < start:
                 continue
@@ -93,112 +98,187 @@ class DashboardDataService:
             filtered.append(trade)
         return filtered
 
-    def _active_summary(self, trades):
+    def _filter_signal_events(self, events, range_key):
+        start, end = self._range_bounds(range_key)
+        if start is None and end is None:
+            return list(events)
+
+        filtered = []
+        for event in events:
+            raw = event.get("created_at")
+            if not raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                dt = dt.astimezone(self.local_tz)
+            except Exception:
+                continue
+            if start is not None and dt < start:
+                continue
+            if end is not None and dt >= end:
+                continue
+            filtered.append(event)
+        return filtered
+
+    def _active_summary(self):
+        positions = []
+        for position in self.bybit.get_all_positions():
+            try:
+                size = float(position.get("size", 0) or 0)
+            except Exception:
+                size = 0.0
+            if size <= 0:
+                continue
+            positions.append(position)
+
         realized_total = 0.0
         unrealized_total = 0.0
         active_rows = []
 
-        for trade in trades:
-            if trade.get("status") not in ["PENDING", "FILLED"]:
-                continue
+        for position in positions:
+            symbol = position.get("symbol")
+            side = "LONG" if str(position.get("side") or "").upper() == "BUY" else "SHORT"
+            entry = float(position.get("avgPrice", 0) or 0)
 
-            symbol = trade.get("symbol")
-            side = trade.get("side")
-            entry = float(trade.get("entry", 0) or 0)
-            sl = float(trade.get("sl", 0) or 0)
-            tp_hits = int(trade.get("tp_hits", 0) or 0)
-            tps = trade.get("tps") or []
-            realized = 0.0
+            stop_loss = position.get("stopLoss")
+            try:
+                sl = float(stop_loss or 0) if stop_loss not in (None, "") else 0.0
+            except Exception:
+                sl = 0.0
 
-            for tp in tps[:tp_hits]:
+            open_orders = self.bybit.get_open_orders(symbol) if symbol else []
+            tp_candidates = []
+            for order in open_orders:
                 try:
-                    target_price = float(tp.get("price", 0) or 0)
-                    target_qty = float(tp.get("qty", 0) or 0)
+                    reduce_only = bool(order.get("reduceOnly"))
+                    order_type = str(order.get("orderType") or "")
+                    order_price = float(order.get("price", 0) or 0)
+                    status = str(order.get("orderStatus") or order.get("status") or "")
                 except Exception:
                     continue
 
-                if target_price <= 0 or target_qty <= 0 or entry <= 0:
+                if not reduce_only or order_type != "Limit" or order_price <= 0:
                     continue
+                if status not in {"New", "PartiallyFilled", "Untriggered"}:
+                    continue
+                tp_candidates.append(order_price)
 
-                if side == "LONG":
-                    realized += (target_price - entry) * target_qty
-                else:
-                    realized += (entry - target_price) * target_qty
-
-            next_tp = None
-            if tp_hits < len(tps):
-                target = tps[tp_hits].get("price")
-                try:
-                    next_tp = float(target) if target is not None else None
-                except Exception:
-                    next_tp = None
-            size = float(
-                trade.get("remaining_size")
-                or trade.get("filled_size")
-                or trade.get("pending_filled_size")
-                or 0
-            )
-            last_price = self.bybit.get_last_price(symbol) if symbol else None
-
-            if last_price is not None and entry > 0 and size > 0:
-                if side == "LONG":
-                    unrealized = (last_price - entry) * size
-                else:
-                    unrealized = (entry - last_price) * size
+            if side == "LONG":
+                tp_candidates = [price for price in tp_candidates if price > entry]
+                next_tp = min(tp_candidates) if tp_candidates else None
             else:
+                tp_candidates = [price for price in tp_candidates if price < entry]
+                next_tp = max(tp_candidates) if tp_candidates else None
+
+            try:
+                realized = float(
+                    position.get("curRealisedPnl")
+                    or position.get("cumRealisedPnl")
+                    or 0
+                )
+            except Exception:
+                realized = 0.0
+
+            try:
+                unrealized = float(position.get("unrealisedPnl", 0) or 0)
+            except Exception:
                 unrealized = 0.0
+
+            try:
+                size = float(position.get("size", 0) or 0)
+            except Exception:
+                size = 0.0
+
+            last_price = None
+            for key in ["markPrice", "lastPrice"]:
+                raw = position.get(key)
+                try:
+                    if raw not in (None, ""):
+                        last_price = float(raw)
+                        break
+                except Exception:
+                    continue
+            if last_price is None and symbol:
+                last_price = self.bybit.get_last_price(symbol)
 
             realized_total += realized
             unrealized_total += unrealized
+            updated_raw = position.get("updatedTime") or position.get("createdTime")
+            updated_at = updated_raw
+            try:
+                updated_ms = int(updated_raw or 0)
+                if updated_ms > 0:
+                    updated_at = datetime.fromtimestamp(updated_ms / 1000, tz=timezone.utc).isoformat()
+            except Exception:
+                updated_at = updated_raw
+
             active_rows.append({
                 "symbol": symbol,
                 "side": side,
-                "status": trade.get("status"),
-                "tp_hits": tp_hits,
+                "status": "FILLED",
+                "tp_hits": 0,
                 "entry": entry,
                 "sl": sl,
-                "sl_initial": float(trade.get("sl_initial", sl) or sl),
-                "be_moved": bool(trade.get("be_moved")),
+                "sl_initial": sl,
+                "be_moved": bool(entry > 0 and sl > 0 and abs(entry - sl) < 0.00000001),
                 "next_tp": next_tp,
                 "last_price": last_price,
                 "realized_pnl": round(realized, 4),
                 "unrealized_pnl": round(unrealized, 4),
-                "updated_at": trade.get("updated_at"),
+                "updated_at": updated_at,
             })
 
         active_rows.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
         return realized_total, unrealized_total, active_rows
 
     def build_stats(self, range_key="all"):
-        trades = self.storage.get_all_trades()
-        filtered_closed = self._filter_closed_trades(trades, range_key)
-        wins, losses, breakevens, realized_total, closed_rows = self._closed_summary(filtered_closed)
-        active_realized_total, unrealized_total, active_rows = self._active_summary(trades)
-        realized_total += active_realized_total
+        exchange_closed = self.storage.get_exchange_closed_trades(source="exchange_closed_pnl")
+        filtered_exchange_closed = self._filter_exchange_closed_trades(exchange_closed, range_key)
+        signal_events = self.storage.get_signal_events()
+        filtered_signal_events = self._filter_signal_events(signal_events, range_key)
+        sync_meta = self.storage.get_named_sync_state("closed_pnl_history")
+        sync_in_progress = bool(sync_meta) and not bool(sync_meta.get("full_sync_completed"))
+        wins, losses, breakevens, _, closed_rows = self._closed_summary_exchange(filtered_exchange_closed)
+        closed_source_name = "exchange"
+        active_realized_total, unrealized_total, active_rows = self._active_summary()
         account = self.bybit.get_account_summary()
-        active_trade_map = {
-            (trade.get("symbol"), trade.get("created_at"), trade.get("updated_at")): trade
-            for trade in trades
-            if trade.get("status") in ["PENDING", "FILLED"]
-        }
-
-        tp_hits_total = 0
-        sl_hits_total = 0
-
-        for trade in filtered_closed:
-            hits = int(trade.get("tp_hits", 0) or 0)
-            tp_hits_total += hits
-            reason = trade.get("close_reason") or trade.get("exit_reason")
-            if reason in ["STOP_LOSS", "SL"]:
-                sl_hits_total += 1
-
-        for trade in active_trade_map.values():
-            hits = int(trade.get("tp_hits", 0) or 0)
-            tp_hits_total += hits
+        closed_source = filtered_exchange_closed
+        tp_hits_total = sum(int(trade.get("tp_hits", 0) or 0) for trade in closed_source)
+        sl_hits_total = sum(
+            1 for trade in closed_source
+            if (trade.get("close_reason") or "").upper() in {"STOP_LOSS", "SL"}
+        )
+        profit_pnl = sum(
+            float(trade.get("pnl", 0) or 0)
+            for trade in closed_source
+            if float(trade.get("pnl", 0) or 0) > 0
+        )
+        loss_pnl = abs(sum(
+            float(trade.get("pnl", 0) or 0)
+            for trade in closed_source
+            if float(trade.get("pnl", 0) or 0) < 0
+        ))
 
         resolved = wins + losses
         winrate = (wins / resolved * 100) if resolved else 0.0
-        non_loss_rate = ((wins + breakevens) / len(closed_rows) * 100) if closed_rows else 0.0
+        accepted_trades = 0
+        rejected_trades = 0
+
+        for event in filtered_signal_events:
+            status = str(event.get("status") or "").strip().lower()
+            message_id = event.get("message_id")
+            if status == "accepted":
+                accepted_trades += 1
+                continue
+            if status == "rejected":
+                rejected_trades += 1
+                continue
+            if message_id not in (None, ""):
+                accepted_trades += 1
 
         return {
             "summary": {
@@ -206,7 +286,10 @@ class DashboardDataService:
                 "wallet_balance": round(account.get("wallet_balance", 0.0), 4),
                 "equity": round(account.get("equity", 0.0), 4),
                 "range": range_key,
-                "total_trades": len(filtered_closed) + len(active_rows),
+                "total_trades": len(closed_source) + len(active_rows),
+                "suggested_trades": len(filtered_signal_events),
+                "accepted_trades": accepted_trades,
+                "rejected_trades": rejected_trades,
                 "open_trades": len(active_rows),
                 "closed_trades": len(closed_rows),
                 "wins": wins,
@@ -215,9 +298,13 @@ class DashboardDataService:
                 "tp_hits_total": tp_hits_total,
                 "sl_hits_total": sl_hits_total,
                 "winrate": round(winrate, 2),
-                "non_loss_rate": round(non_loss_rate, 2),
-                "realized_pnl": round(realized_total, 4),
+                "profit_pnl": round(profit_pnl, 4),
+                "loss_pnl": round(loss_pnl, 4),
                 "unrealized_pnl": round(unrealized_total, 4),
+                "sync_in_progress": sync_in_progress,
+                "closed_trades_source": closed_source_name,
+                "exchange_closed_ready": bool(filtered_exchange_closed),
+                "exchange_summary_only": True,
             },
             "active_trades": active_rows[:25],
             "closed_trades": closed_rows[:25],
@@ -264,6 +351,87 @@ class DashboardDataService:
     def build_equity_curve(self, range_key="all"):
         account = self.bybit.get_account_summary()
         current_wallet = float(account.get("wallet_balance", 0.0) or 0.0)
+        current_equity = float(account.get("equity", 0.0) or 0.0)
+        transaction_history = self.storage.get_transaction_history()
+        balance_history = self.storage.get_balance_history()
+        sync_meta = self.storage.get_transaction_history_meta()
+        sync_in_progress = bool(sync_meta) and not bool(sync_meta.get("full_sync_completed"))
+
+        transaction_points = []
+        for item in transaction_history:
+            try:
+                ts = int(item.get("transaction_time", 0) or 0)
+            except Exception:
+                ts = 0
+            if ts <= 0:
+                continue
+
+            dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).astimezone(self.local_tz)
+            label = item.get("symbol") or item.get("type") or "transaction"
+            transaction_points.append({
+                "dt": dt,
+                "label": label,
+                "balance": round(float(item.get("cash_balance", 0.0) or 0.0), 4),
+            })
+
+        transaction_points.sort(key=lambda item: item["dt"])
+        if transaction_points:
+            filtered = self._filter_equity_points(transaction_points, range_key)
+            return {
+                "range": range_key,
+                "history_source": "exchange",
+                "sync_in_progress": sync_in_progress,
+                "points": [
+                    {
+                        "time": point["dt"].isoformat(),
+                        "label": point["label"],
+                        "balance": point["balance"],
+                    }
+                    for point in filtered
+                ],
+                "current_wallet_balance": round(current_wallet, 4),
+                "current_equity_balance": round(current_equity, 4),
+            }
+
+        history_points = []
+        for item in balance_history:
+            raw = item.get("captured_at")
+            if not raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+            except Exception:
+                continue
+            history_points.append({
+                "dt": dt.astimezone(self.local_tz),
+                "label": "snapshot",
+                "balance": round(float(item.get("wallet_balance", 0.0) or 0.0), 4),
+                "wallet_balance": round(float(item.get("wallet_balance", 0.0) or 0.0), 4),
+                "equity": round(float(item.get("equity", 0.0) or 0.0), 4),
+            })
+
+        history_points.sort(key=lambda item: item["dt"])
+        if history_points:
+            filtered = self._filter_equity_points(history_points, range_key)
+            return {
+                "range": range_key,
+                "history_source": "local_fallback",
+                "sync_in_progress": sync_in_progress,
+                "points": [
+                    {
+                        "time": point["dt"].isoformat(),
+                        "label": point["label"],
+                        "balance": point["balance"],
+                    }
+                    for point in filtered
+                ],
+                "current_wallet_balance": round(current_wallet, 4),
+                "current_equity_balance": round(current_equity, 4),
+            }
 
         closed_trades = [
             trade for trade in self.storage.get_all_trades()
@@ -305,6 +473,8 @@ class DashboardDataService:
         filtered = self._filter_equity_points(points, range_key)
         return {
             "range": range_key,
+            "history_source": "pnl_fallback",
+            "sync_in_progress": sync_in_progress,
             "points": [
                 {
                     "time": point["dt"].isoformat(),
@@ -314,4 +484,5 @@ class DashboardDataService:
                 for point in filtered
             ],
             "current_wallet_balance": round(current_wallet, 4),
+            "current_equity_balance": round(current_equity, 4),
         }

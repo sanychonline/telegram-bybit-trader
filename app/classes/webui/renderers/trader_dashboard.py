@@ -52,6 +52,7 @@ def render_trader_dashboard_html(brand_name, refresh_ms, disclaimer_text):
         </select>
       </div>
     </div>
+    <div class="exchange-status" id="exchange-status"></div>
     <div class="cards" id="cards"></div>
     <div class="tables">
       <div class="panel">

@@ -1,4 +1,5 @@
 import math
+import time
 from datetime import datetime, timezone
 from pybit.unified_trading import HTTP
 from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_TESTNET
@@ -6,6 +7,11 @@ from classes.reporting.health_state import touch
 
 
 class BybitClient:
+    TRANSACTION_LOG_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+    TRANSACTION_LOG_RETENTION_MS = 730 * 24 * 60 * 60 * 1000
+    EXECUTION_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+    EXECUTION_HISTORY_RETENTION_MS = 730 * 24 * 60 * 60 * 1000
+
     def __init__(self, logger=None):
         self.client = HTTP(
             testnet=BYBIT_TESTNET,
@@ -287,31 +293,295 @@ class BybitClient:
         touch("bybit")
         return True
 
-    def get_last_execution_price(self, symbol):
+    def _normalize_transaction_event(self, item):
         try:
-            closes = self.get_close_executions(symbol)
+            transaction_time = int(item.get("transactionTime", 0) or 0)
+        except Exception:
+            transaction_time = 0
 
-            if not closes:
-                return None
+        def as_float(value):
+            try:
+                return float(value or 0)
+            except Exception:
+                return 0.0
 
-            total_qty = 0
-            total_value = 0
+        return {
+            "id": item.get("id"),
+            "symbol": item.get("symbol"),
+            "category": item.get("category"),
+            "side": item.get("side"),
+            "type": item.get("type"),
+            "currency": item.get("currency"),
+            "transaction_time": transaction_time,
+            "cash_balance": as_float(item.get("cashBalance")),
+            "change": as_float(item.get("change")),
+            "cash_flow": as_float(item.get("cashFlow")),
+            "funding": as_float(item.get("funding")),
+            "fee": as_float(item.get("fee")),
+            "trade_price": as_float(item.get("tradePrice")),
+            "qty": as_float(item.get("qty")),
+            "size": as_float(item.get("size")),
+            "order_id": item.get("orderId"),
+            "order_link_id": item.get("orderLinkId"),
+            "trade_id": item.get("tradeId"),
+            "trans_sub_type": item.get("transSubType"),
+        }
 
-            for e in closes:
-                price = float(e["execPrice"])
-                qty = float(e["execQty"])
+    def fetch_transaction_log_range(self, start_ms, end_ms, currency="USDT"):
+        cursor = None
+        items = []
 
-                total_qty += qty
-                total_value += price * qty
+        while True:
+            params = {
+                "accountType": "UNIFIED",
+                "currency": currency,
+                "startTime": int(start_ms),
+                "endTime": int(end_ms),
+                "limit": 50,
+            }
+            if cursor:
+                params["cursor"] = cursor
 
-            if total_qty > 0:
-                return total_value / total_qty
+            res = self.client.get_transaction_log(**params)
+            touch("bybit")
+            result = res.get("result", {})
+            page = result.get("list", []) or []
+            items.extend(self._normalize_transaction_event(item) for item in page)
 
-            return None
+            cursor = result.get("nextPageCursor")
+            if not cursor:
+                break
 
-        except Exception as e:
-            print(f"Execution fetch error: {e}")
-            return None
+            time.sleep(0.05)
+
+        return items
+
+    def sync_transaction_history(self, storage, currency="USDT"):
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        meta = storage.get_transaction_history_meta()
+        events = storage.get_transaction_history()
+
+        retention_start_ms = now_ms - self.TRANSACTION_LOG_RETENTION_MS
+        full_sync_completed = bool(meta.get("full_sync_completed"))
+        oldest_fetched_ms = int(meta.get("oldest_fetched_ms") or now_ms)
+        newest_fetched_ms = int(meta.get("newest_fetched_ms") or 0)
+
+        if not events:
+            full_sync_completed = False
+            oldest_fetched_ms = now_ms
+            newest_fetched_ms = 0
+
+        if not full_sync_completed:
+            fetch_end_ms = oldest_fetched_ms or now_ms
+            fetch_start_ms = max(retention_start_ms, fetch_end_ms - self.TRANSACTION_LOG_WINDOW_MS)
+            fetched = self.fetch_transaction_log_range(fetch_start_ms, fetch_end_ms, currency=currency)
+
+            storage.record_transaction_events(
+                fetched,
+                oldest_fetched_ms=fetch_start_ms,
+                newest_fetched_ms=max(newest_fetched_ms, fetch_end_ms),
+                full_sync_completed=fetch_start_ms <= retention_start_ms,
+                last_synced_at=datetime.now(timezone.utc).isoformat(),
+                currency=currency,
+            )
+            return len(fetched)
+
+        recent_start_ms = max(retention_start_ms, now_ms - self.TRANSACTION_LOG_WINDOW_MS)
+        fetched = self.fetch_transaction_log_range(recent_start_ms, now_ms, currency=currency)
+        storage.record_transaction_events(
+            fetched,
+            oldest_fetched_ms=oldest_fetched_ms,
+            newest_fetched_ms=now_ms,
+            full_sync_completed=True,
+            last_synced_at=datetime.now(timezone.utc).isoformat(),
+            currency=currency,
+        )
+        return len(fetched)
+
+    def fetch_execution_history_range(self, start_ms, end_ms):
+        cursor = None
+        items = []
+
+        while True:
+            params = {
+                "category": "linear",
+                "startTime": int(start_ms),
+                "endTime": int(end_ms),
+                "limit": 100,
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            res = self.client.get_executions(**params)
+            touch("bybit")
+            result = res.get("result", {})
+            page = result.get("list", []) or []
+            items.extend(page)
+
+            cursor = result.get("nextPageCursor")
+            if not cursor:
+                break
+
+            time.sleep(0.05)
+
+        items.sort(key=lambda item: int(item.get("execTime", 0) or 0))
+        return items
+
+    def fetch_closed_pnl_range(self, start_ms, end_ms):
+        cursor = None
+        items = []
+
+        while True:
+            params = {
+                "category": "linear",
+                "startTime": int(start_ms),
+                "endTime": int(end_ms),
+                "limit": 100,
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            res = self.client.get_closed_pnl(**params)
+            touch("bybit")
+            result = res.get("result", {})
+            page = result.get("list", []) or []
+            items.extend(page)
+
+            cursor = result.get("nextPageCursor")
+            if not cursor:
+                break
+
+            time.sleep(0.05)
+
+        items.sort(key=lambda item: int(item.get("updatedTime", 0) or 0))
+        return items
+
+    def _infer_closed_pnl_reason(self, item, executions):
+        for execution in executions or []:
+            stop_order_type = str(execution.get("stopOrderType", "") or "")
+            create_type = str(execution.get("createType", "") or "")
+            order_type = str(execution.get("orderType", "") or "")
+
+            if stop_order_type in {"StopLoss", "Stop", "TrailingStop"} or "StopLoss" in create_type:
+                return "SL", 0
+            if stop_order_type in {"TakeProfit", "PartialTakeProfit"} or "TakeProfit" in create_type:
+                return "TP", 1
+            if order_type == "Limit":
+                return "TP", 1
+            if create_type == "CreateByClosing":
+                return "MANUAL_CLOSE", 0
+
+        order_type = str(item.get("orderType", "") or "")
+        if order_type == "Limit":
+            return "TP", 1
+        if order_type == "Market":
+            return "CLOSED", 0
+        return "CLOSED", 0
+
+    def _normalize_closed_pnl_trade(self, item, executions=None):
+        close_side = str(item.get("side") or "").upper()
+        position_side = "SHORT" if close_side == "BUY" else "LONG"
+
+        order_id = str(item.get("orderId") or "")
+        created_ms = int(item.get("createdTime", 0) or 0)
+        updated_ms = int(item.get("updatedTime", 0) or 0)
+        opened_at = datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc).isoformat() if created_ms > 0 else None
+        closed_at = datetime.fromtimestamp(updated_ms / 1000, tz=timezone.utc).isoformat() if updated_ms > 0 else None
+        close_reason, tp_hits = self._infer_closed_pnl_reason(item, executions or [])
+
+        return {
+            "trade_key": f"closedpnl:{order_id or item.get('symbol')}:{updated_ms}",
+            "trade_id": "",
+            "symbol": item.get("symbol"),
+            "side": position_side,
+            "opened_at": opened_at,
+            "closed_at": closed_at,
+            "entry_price": float(item.get("avgEntryPrice", 0) or 0),
+            "exit_price": float(item.get("avgExitPrice", 0) or 0),
+            "qty": float(item.get("closedSize") or item.get("qty") or 0),
+            "pnl": float(item.get("closedPnl", 0) or 0),
+            "close_reason": close_reason,
+            "tp_hits": tp_hits,
+            "be_moved": False,
+            "message_id": "",
+            "order_id": order_id,
+            "sl_initial": 0.0,
+            "sl_final": 0.0,
+            "executions": executions or [],
+            "context": {
+                "exec_type": item.get("execType"),
+                "order_type": item.get("orderType"),
+                "fill_count": item.get("fillCount"),
+                "raw": item,
+            },
+        }
+
+    def sync_closed_pnl_history(self, storage):
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        retention_start_ms = now_ms - self.EXECUTION_HISTORY_RETENTION_MS
+        meta = storage.get_named_sync_state("closed_pnl_history")
+
+        full_sync_completed = bool(meta.get("full_sync_completed"))
+        oldest_fetched_ms = int(meta.get("oldest_fetched_ms") or now_ms)
+
+        recent_start_ms = max(retention_start_ms, now_ms - self.EXECUTION_HISTORY_WINDOW_MS)
+        recent_items = self.fetch_closed_pnl_range(recent_start_ms, now_ms)
+        normalized = [
+            self._normalize_closed_pnl_trade(item, storage.get_execution_events_by_order_id(item.get("orderId")))
+            for item in recent_items
+        ]
+
+        fetch_start_ms = oldest_fetched_ms
+        if not full_sync_completed:
+            fetch_end_ms = oldest_fetched_ms or now_ms
+            fetch_start_ms = max(retention_start_ms, fetch_end_ms - self.EXECUTION_HISTORY_WINDOW_MS)
+            older_items = self.fetch_closed_pnl_range(fetch_start_ms, fetch_end_ms)
+            normalized.extend(
+                self._normalize_closed_pnl_trade(item, storage.get_execution_events_by_order_id(item.get("orderId")))
+                for item in older_items
+            )
+
+        storage.upsert_exchange_closed_trades("exchange_closed_pnl", normalized)
+        storage.update_named_sync_state(
+            "closed_pnl_history",
+            oldest_fetched_ms=fetch_start_ms if not full_sync_completed else oldest_fetched_ms,
+            newest_fetched_ms=now_ms,
+            full_sync_completed=full_sync_completed or (not full_sync_completed and fetch_start_ms <= retention_start_ms),
+            last_synced_at=datetime.now(timezone.utc).isoformat(),
+        )
+        return len(normalized)
+
+    def sync_execution_history(self, storage):
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        retention_start_ms = now_ms - self.EXECUTION_HISTORY_RETENTION_MS
+        meta = storage.get_named_sync_state("execution_history")
+
+        full_sync_completed = bool(meta.get("full_sync_completed"))
+        oldest_fetched_ms = int(meta.get("oldest_fetched_ms") or now_ms)
+        newest_fetched_ms = int(meta.get("newest_fetched_ms") or 0)
+
+        recent_start_ms = max(retention_start_ms, now_ms - self.EXECUTION_HISTORY_WINDOW_MS)
+        recent_events = self.fetch_execution_history_range(recent_start_ms, now_ms)
+
+        fetched = len(recent_events)
+        fetch_end_ms = oldest_fetched_ms or now_ms
+        fetch_start_ms = fetch_end_ms
+        older_events = []
+
+        if not full_sync_completed:
+            fetch_end_ms = oldest_fetched_ms or now_ms
+            fetch_start_ms = max(retention_start_ms, fetch_end_ms - self.EXECUTION_HISTORY_WINDOW_MS)
+            older_events = self.fetch_execution_history_range(fetch_start_ms, fetch_end_ms)
+            fetched += len(older_events)
+
+        storage.record_execution_events(
+            recent_events + older_events,
+            oldest_fetched_ms=fetch_start_ms if not full_sync_completed else oldest_fetched_ms,
+            newest_fetched_ms=now_ms,
+            full_sync_completed=full_sync_completed or (not full_sync_completed and fetch_start_ms <= retention_start_ms),
+            last_synced_at=datetime.now(timezone.utc).isoformat(),
+        )
+        return fetched
 
     def _parse_trade_time(self, value):
         if not value:

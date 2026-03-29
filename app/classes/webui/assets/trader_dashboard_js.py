@@ -17,6 +17,8 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
     let closedTradesData = [];
     let activePage = 1;
     let closedPage = 1;
+    let exchangeStatusTimer = null;
+    let lastExchangeStatusKey = '';
     const translations = {translations_json};
     function tr(text) {{
       const dict = translations[currentLang] || translations.en;
@@ -31,6 +33,10 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
     }}
     function card(label, value, klass='') {{
       return `<div class="card"><div class="label">${{label}}</div><div class="value ${{klass}}">${{value}}</div></div>`;
+    }}
+    function displayStat(value, formatter=null) {{
+      if (value === null || value === undefined || value === '') return '—';
+      return formatter ? formatter(value) : value;
     }}
     function setPnlTitle(value) {{
       const pnl = Number(value || 0);
@@ -286,6 +292,36 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
         renderClosedTrades();
       }});
     }}
+    function renderExchangeStatus(summary) {{
+      const node = document.getElementById('exchange-status');
+      if (!node || !summary) return;
+      const ready = Boolean(summary.exchange_closed_ready);
+      const syncing = Boolean(summary.sync_in_progress);
+      let variant = 'syncing';
+      let message = tr('No exchange closed trades found for this period.');
+
+      if (ready) {{
+        variant = 'exchange';
+        message = tr('Closed trades and stats are loaded from exchange history.');
+      }} else if (syncing) {{
+        message = tr('Exchange closed trades are still syncing for this period.');
+      }}
+
+      const statusKey = `${{summary.range || currentRange}}|${{variant}}|${{message}}`;
+      if (statusKey === lastExchangeStatusKey) return;
+      lastExchangeStatusKey = statusKey;
+
+      if (exchangeStatusTimer) {{
+        clearTimeout(exchangeStatusTimer);
+        exchangeStatusTimer = null;
+      }}
+
+      node.className = `exchange-status visible ${{variant}}`;
+      node.textContent = message;
+      exchangeStatusTimer = window.setTimeout(() => {{
+        node.className = `exchange-status ${{variant}}`;
+      }}, 3200);
+    }}
     function applyDeviceMode() {{
       const isMobile = window.matchMedia('(max-width: 820px)').matches || window.matchMedia('(pointer: coarse)').matches;
       document.body.classList.toggle('mobile', isMobile);
@@ -350,6 +386,20 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
         <circle id="hover-dot" cx="0" cy="0" r="5" fill="${{getCssVar('--accent', '#56a6ff')}}" stroke="#ffffff" stroke-width="2" opacity="0" />
       `;
       caption.textContent = `${{tr('rangePrefix')}}: ${{rangeLabel(currentRange)}} | ${{tr('points')}}: ${{points.length}} | ${{tr('lastBalance')}}: ${{fmt(last)}} | ${{tr('currentWallet')}}: ${{fmt(currentWallet)}}`;
+    }}
+    function setEquitySyncCaption(data) {{
+      const caption = document.getElementById('equity-caption');
+      if (!caption || !data || !data.sync_in_progress) return;
+      const suffix = tr('Exchange history sync in progress...');
+      if (!Array.isArray(data.points) || !data.points.length) {{
+        caption.textContent = suffix;
+        return;
+      }}
+      if (data.history_source === 'local_fallback' || data.history_source === 'pnl_fallback') {{
+        caption.textContent += ` | ${{tr('Showing local data until exchange sync completes.')}}`;
+        return;
+      }}
+      caption.textContent += ` | ${{suffix}}`;
     }}
     function bindChartHover() {{
       const svg = document.getElementById('equity-chart');
@@ -416,7 +466,8 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
     async function refreshEquity() {{
       const res = await fetch(`api/equity?range=${{currentRange}}`, {{ cache: 'no-store' }});
       const data = await res.json();
-      drawEquity(data.points || [], data.current_wallet_balance || 0);
+      drawEquity(data.points || [], data.current_wallet_balance ?? data.current_equity_balance ?? 0);
+      setEquitySyncCaption(data);
       bindChartHover();
       syncRangeSelect();
     }}
@@ -424,20 +475,24 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       const res = await fetch(`api/stats?range=${{currentRange}}`, {{ cache: 'no-store' }});
       const data = await res.json();
       const s = data.summary;
+      renderExchangeStatus(s);
       document.getElementById('cards').innerHTML = [
+        card(tr('Profit PnL'), displayStat(s.profit_pnl, fmt), cls(s.profit_pnl)),
+        card(tr('Loss PnL'), displayStat(s.loss_pnl, fmt), cls(-(Number(s.loss_pnl || 0)))),
         card(tr('Available Balance'), fmt(s.available_balance), cls(s.available_balance)),
         card(tr('Wallet Balance'), fmt(s.wallet_balance), cls(s.wallet_balance)),
         card(tr('Equity'), fmt(s.equity), cls(s.equity)),
-        card(tr('Open Trades'), s.open_trades),
+        card(tr('Suggested Trades'), s.suggested_trades),
+        card(tr('Accepted Trades'), s.accepted_trades),
+        card(tr('Rejected Trades'), s.rejected_trades),
+        card(tr('Active Trades'), s.open_trades),
         card(tr('Closed Trades'), s.closed_trades),
-        card(tr('Winrate'), `${{fmt(s.winrate)}}%`),
-        card(tr('Non-Loss Rate'), `${{fmt(s.non_loss_rate)}}%`),
-        card(tr('Realized PnL'), fmt(s.realized_pnl), cls(s.realized_pnl)),
-        card(tr('Unrealized PnL'), fmt(s.unrealized_pnl), cls(s.unrealized_pnl)),
+        card(tr('Winrate'), displayStat(s.winrate, (value) => `${{fmt(value)}}%`)),
+        card(tr('Unrealized PnL'), displayStat(s.unrealized_pnl, fmt), cls(s.unrealized_pnl)),
         card(tr('Wins'), s.wins),
         card(tr('Losses'), s.losses),
-        card(tr('TP hits'), s.tp_hits_total),
-        card(tr('SL hits'), s.sl_hits_total),
+        card(tr('TP hits'), displayStat(s.tp_hits_total)),
+        card(tr('SL hits'), displayStat(s.sl_hits_total)),
       ].join('');
       setPnlTitle(s.unrealized_pnl);
       activeTradesData = Array.isArray(data.active_trades) ? data.active_trades : [];

@@ -132,6 +132,7 @@ class Reconciliation:
                 updates["close_pending_checks"] = 0
                 if updates:
                     self.storage.update_trade(trade["id"], updates)
+                    trade = self.storage.get_trade(trade["id"]) or trade
                 self.storage.close_trade(
                     trade["id"],
                     exit_price,

@@ -107,19 +107,49 @@ TRADER_DASHBOARD_CSS = r"""
     }
     .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
       margin-bottom: 18px;
+    }
+    .exchange-status {
+      display: block;
+      margin-bottom: 0;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
+      color: var(--muted);
+      font-size: 13px;
+      box-shadow: var(--panel-shadow);
+      position: fixed;
+      top: 18px;
+      left: 50%;
+      transform: translate(-50%, -8px);
+      width: min(720px, calc(100vw - 32px));
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+    .exchange-status.visible {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    .exchange-status.exchange {
+      color: var(--green);
+    }
+    .exchange-status.syncing {
+      color: var(--amber);
     }
     .card, .panel {
       background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
       border: 1px solid var(--line);
       border-radius: 18px;
-      padding: 16px;
+      padding: 14px;
       box-shadow: var(--panel-shadow);
     }
-    .label { color: var(--muted); font-size: 12px; margin-bottom: 8px; text-transform: uppercase; }
-    .value { font-size: 26px; font-weight: 700; }
+    .label { color: var(--muted); font-size: 11px; margin-bottom: 6px; text-transform: uppercase; }
+    .value { font-size: 23px; font-weight: 700; line-height: 1.05; }
     .green { color: var(--green); }
     .red { color: var(--red); }
     .amber { color: var(--amber); }

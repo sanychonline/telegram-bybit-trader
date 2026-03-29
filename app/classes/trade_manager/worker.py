@@ -54,8 +54,19 @@ class Worker:
     def handle_signal(self, signal, message_id, source="telegram"):
         symbol = signal["symbol"]
 
+        self.storage.record_signal_event({
+            "message_id": message_id,
+            "symbol": signal.get("symbol"),
+            "side": signal.get("side"),
+            "source": source,
+        })
+
         with self._message_lock:
             if message_id in self._inflight_message_ids:
+                self.storage.update_signal_event(message_id, {
+                    "status": "rejected",
+                    "reason": "message_already_processing",
+                })
                 self.logger.warning(
                     f"{symbol} signal rejected | source={source} | message_id={message_id} | "
                     f"reason=message_already_processing"
@@ -68,6 +79,10 @@ class Worker:
             with symbol_lock:
                 existing_by_message = self.storage.find_by_message_id(message_id)
                 if existing_by_message:
+                    self.storage.update_signal_event(message_id, {
+                        "status": "rejected",
+                        "reason": "duplicate_message_id",
+                    })
                     self.logger.warning(
                         f"{symbol} signal rejected | source={source} | message_id={message_id} | "
                         f"reason=duplicate_message_id | existing_trade_id={existing_by_message.get('id')}"
@@ -76,6 +91,10 @@ class Worker:
 
                 existing = self.storage.find_active_by_symbol(symbol)
                 if existing:
+                    self.storage.update_signal_event(message_id, {
+                        "status": "rejected",
+                        "reason": "active_trade_exists",
+                    })
                     self.logger.warning(
                         f"{symbol} signal rejected | source={source} | message_id={message_id} | reason=active_trade_exists"
                     )
@@ -83,6 +102,11 @@ class Worker:
 
                 exchange_locked, exchange_lock_reason = self.bybit.has_open_entry_or_position(symbol)
                 if exchange_locked:
+                    self.storage.update_signal_event(message_id, {
+                        "status": "rejected",
+                        "reason": "exchange_symbol_locked",
+                        "exchange_lock_reason": exchange_lock_reason,
+                    })
                     self.logger.warning(
                         f"{symbol} signal rejected | source={source} | message_id={message_id} | "
                         f"reason=exchange_symbol_locked | lock={exchange_lock_reason}"
@@ -94,6 +118,10 @@ class Worker:
                 order = self.execution.prepare_order(signal, balance)
                 if not order:
                     reason = getattr(self.execution, "last_reject_reason", "execution_rejected")
+                    self.storage.update_signal_event(message_id, {
+                        "status": "rejected",
+                        "reason": reason,
+                    })
                     self.logger.warning(
                         f"{symbol} signal rejected | source={source} | message_id={message_id} | reason={reason}"
                     )
@@ -105,6 +133,10 @@ class Worker:
                     order["price"]
                 )
                 if too_far:
+                    self.storage.update_signal_event(message_id, {
+                        "status": "rejected",
+                        "reason": "market_moved_too_far",
+                    })
                     self.logger.warning(
                         f"{symbol} signal rejected | source={source} | message_id={message_id} | "
                         f"reason=market_moved_too_far | entry={order['price']} market={market_price} "
@@ -115,6 +147,11 @@ class Worker:
                 try:
                     order_id = self.execution.place_entry(order)
                 except Exception as e:
+                    self.storage.update_signal_event(message_id, {
+                        "status": "rejected",
+                        "reason": "exchange_error",
+                        "error": str(e),
+                    })
                     self.logger.error(
                         f"{self._format_exchange_error(symbol, e)} | source={source} | message_id={message_id}"
                     )
@@ -143,6 +180,11 @@ class Worker:
                     f"{symbol} signal accepted | source={source} | message_id={message_id} | "
                     f"trade_id={trade_id} order_id={order_id} size={order['size']} entry={order['price']}"
                 )
+                self.storage.update_signal_event(message_id, {
+                    "status": "accepted",
+                    "trade_id": trade_id,
+                    "order_id": order_id,
+                })
         finally:
             with self._message_lock:
                 self._inflight_message_ids.discard(message_id)
