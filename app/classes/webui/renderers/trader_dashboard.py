@@ -31,7 +31,7 @@ def render_trader_dashboard_html(refresh_ms):
 {options_html}
           </select>
         </label>
-        <button id="theme-toggle" class="theme-toggle" type="button">Theme: auto</button>
+        <button id="theme-toggle" class="icon-toggle" type="button" aria-label="Theme" title="Theme"></button>
       </div>
     </div>
     <div class="subbar">

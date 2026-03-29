@@ -21,6 +21,7 @@ def build_trader_dashboard_js(refresh_ms):
     let lastExchangeStatusKey = '';
     let settingsPayload = null;
     const translations = {translations_json};
+    const themeModes = ['auto', 'day', 'night'];
     const settingsGroups = {{
       general: ['tz', 'dashboard_refresh_sec'],
       bybit: ['bybit_testnet'],
@@ -119,11 +120,74 @@ def build_trader_dashboard_js(refresh_ms):
       const hour = new Date().getHours();
       return hour >= 7 && hour < 20 ? 'day' : 'night';
     }}
+    function themeIcon(mode) {{
+      const text = getCssVar('--text', '#ebf3f9');
+      const accent = getCssVar('--accent', '#56a6ff');
+      const amber = getCssVar('--amber', '#efbe53');
+      const line = getCssVar('--line', '#26415a');
+      const panel2 = getCssVar('--panel2', '#142333');
+      if (mode === 'day') {{
+        return `
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="4.2" fill="${{amber}}"></circle>
+            <g stroke="${{amber}}" stroke-width="1.7" stroke-linecap="round">
+              <line x1="12" y1="1.8" x2="12" y2="4.8"></line>
+              <line x1="12" y1="19.2" x2="12" y2="22.2"></line>
+              <line x1="1.8" y1="12" x2="4.8" y2="12"></line>
+              <line x1="19.2" y1="12" x2="22.2" y2="12"></line>
+              <line x1="4.6" y1="4.6" x2="6.7" y2="6.7"></line>
+              <line x1="17.3" y1="17.3" x2="19.4" y2="19.4"></line>
+              <line x1="17.3" y1="6.7" x2="19.4" y2="4.6"></line>
+              <line x1="4.6" y1="19.4" x2="6.7" y2="17.3"></line>
+            </g>
+          </svg>
+        `;
+      }}
+      if (mode === 'night') {{
+        return `
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="13.2" cy="11.8" r="6.1" fill="${{text}}"></circle>
+            <circle cx="16.4" cy="9.8" r="5.2" fill="${{panel2}}"></circle>
+            <circle cx="17.2" cy="16.1" r="1.2" fill="${{line}}"></circle>
+          </svg>
+        `;
+      }}
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="theme-auto-split" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+              <stop offset="50%" stop-color="${{amber}}"></stop>
+              <stop offset="50%" stop-color="${{panel2}}"></stop>
+            </linearGradient>
+          </defs>
+          <circle cx="12" cy="12" r="10" fill="url(#theme-auto-split)"></circle>
+          <circle cx="8.4" cy="8.4" r="3.1" fill="${{amber}}"></circle>
+          <g stroke="${{amber}}" stroke-width="1.2" stroke-linecap="round">
+            <line x1="8.4" y1="2.4" x2="8.4" y2="4.4"></line>
+            <line x1="8.4" y1="12.4" x2="8.4" y2="14.4"></line>
+            <line x1="2.4" y1="8.4" x2="4.4" y2="8.4"></line>
+            <line x1="12.4" y1="8.4" x2="14.4" y2="8.4"></line>
+            <line x1="4.2" y1="4.2" x2="5.5" y2="5.5"></line>
+            <line x1="11.3" y1="11.3" x2="12.6" y2="12.6"></line>
+          </g>
+          <circle cx="16.2" cy="15.2" r="4.9" fill="${{text}}"></circle>
+          <circle cx="18.3" cy="13.3" r="4.2" fill="${{panel2}}"></circle>
+          <circle cx="18.8" cy="17.4" r="1" fill="${{line}}"></circle>
+        </svg>
+      `;
+    }}
+    function updateThemeButton(mode) {{
+      const button = document.getElementById('theme-toggle');
+      if (!button) return;
+      const label = `${{tr('theme')}}: ${{tr(mode)}}`;
+      button.innerHTML = themeIcon(mode);
+      button.title = label;
+      button.setAttribute('aria-label', label);
+    }}
     function applyTheme(mode) {{
       const effective = mode === 'auto' ? detectAutoTheme() : mode;
       document.documentElement.classList.toggle('day-theme', effective === 'day');
-      const button = document.getElementById('theme-toggle');
-      if (button) button.textContent = `${{tr('theme')}}: ${{tr(mode)}}`;
+      updateThemeButton(mode);
     }}
     function applyLanguage(lang) {{
       currentLang = translations[lang] ? lang : 'en';
@@ -171,14 +235,13 @@ def build_trader_dashboard_js(refresh_ms):
       if (footer) footer.style.display = 'none';
     }}
     function initThemeToggle() {{
-      const order = ['auto', 'day', 'night'];
       let mode = getCookie('ui_theme') || 'auto';
-      if (!order.includes(mode)) mode = 'auto';
+      if (!themeModes.includes(mode)) mode = 'auto';
       applyTheme(mode);
       window.addEventListener('message', (event) => {{
         if (event.origin !== window.location.origin) return;
         const data = event.data || {{}};
-        if (data.type === 'ui-theme-change' && order.includes(data.mode)) {{
+        if (data.type === 'ui-theme-change' && themeModes.includes(data.mode)) {{
           mode = data.mode;
           setCookie('ui_theme', mode);
           applyTheme(mode);
@@ -190,7 +253,7 @@ def build_trader_dashboard_js(refresh_ms):
       const button = document.getElementById('theme-toggle');
       if (!button) return;
       button.addEventListener('click', () => {{
-        const next = order[(order.indexOf(mode) + 1) % order.length];
+        const next = themeModes[(themeModes.indexOf(mode) + 1) % themeModes.length];
         mode = next;
         setCookie('ui_theme', mode);
         applyTheme(mode);
@@ -661,23 +724,34 @@ def build_trader_dashboard_js(refresh_ms):
       const data = await res.json();
       const s = data.summary;
       renderExchangeStatus(s);
-      document.getElementById('cards').innerHTML = [
+      const performanceCards = [
         card(tr('Profit PnL'), displayStat(s.profit_pnl, fmt), cls(s.profit_pnl)),
         card(tr('Loss PnL'), displayStat(s.loss_pnl, fmt), cls(-(Number(s.loss_pnl || 0)))),
+        card(tr('Net Profit'), displayStat(s.net_profit_pnl, fmt), cls(s.net_profit_pnl)),
+        card(tr('Winrate'), displayStat(s.winrate, (value) => `${{fmt(value)}}%`)),
+        card(tr('Lossrate'), displayStat(s.lossrate, (value) => `${{fmt(value)}}%`)),
+        card(tr('Unrealized PnL'), displayStat(s.unrealized_pnl, fmt), cls(s.unrealized_pnl)),
+      ];
+      const capitalCards = [
         card(tr('Available Balance'), fmt(s.available_balance), cls(s.available_balance)),
         card(tr('Wallet Balance'), fmt(s.wallet_balance), cls(s.wallet_balance)),
         card(tr('Equity'), fmt(s.equity), cls(s.equity)),
         card(tr('Suggested Trades'), s.suggested_trades),
         card(tr('Accepted Trades'), s.accepted_trades),
         card(tr('Rejected Trades'), s.rejected_trades),
+      ];
+      const tradeCards = [
         card(tr('Active Trades'), s.open_trades),
         card(tr('Closed Trades'), s.closed_trades),
-        card(tr('Winrate'), displayStat(s.winrate, (value) => `${{fmt(value)}}%`)),
-        card(tr('Unrealized PnL'), displayStat(s.unrealized_pnl, fmt), cls(s.unrealized_pnl)),
         card(tr('Wins'), s.wins),
         card(tr('Losses'), s.losses),
         card(tr('TP hits'), displayStat(s.tp_hits_total)),
         card(tr('SL hits'), displayStat(s.sl_hits_total)),
+      ];
+      document.getElementById('cards').innerHTML = [
+        ...performanceCards,
+        ...capitalCards,
+        ...tradeCards,
       ].join('');
       setPnlTitle(s.unrealized_pnl);
       activeTradesData = Array.isArray(data.active_trades) ? data.active_trades : [];

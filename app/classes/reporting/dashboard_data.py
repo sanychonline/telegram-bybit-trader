@@ -299,6 +299,8 @@ class DashboardDataService:
 
         resolved = wins + losses
         winrate = (wins / resolved * 100) if resolved else 0.0
+        lossrate = (losses / resolved * 100) if resolved else 0.0
+        net_profit_pnl = profit_pnl - loss_pnl
         accepted_trades = len(filtered_local_trades)
         rejected_trades = 0
 
@@ -325,8 +327,10 @@ class DashboardDataService:
                 "tp_hits_total": tp_hits_total,
                 "sl_hits_total": sl_hits_total,
                 "winrate": round(winrate, 2),
+                "lossrate": round(lossrate, 2),
                 "profit_pnl": round(profit_pnl, 4),
                 "loss_pnl": round(loss_pnl, 4),
+                "net_profit_pnl": round(net_profit_pnl, 4),
                 "unrealized_pnl": round(unrealized_total, 4),
                 "sync_in_progress": sync_in_progress,
                 "closed_trades_source": closed_source_name,

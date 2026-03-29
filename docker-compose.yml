@@ -41,6 +41,6 @@ services:
       - bot
 
     ports:
-      - "${DASHBOARD_PORT:-1002}:1002"
+      - "${DASHBOARD_PORT:-1002}:80"
 
     restart: unless-stopped

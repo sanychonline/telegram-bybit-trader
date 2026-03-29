@@ -58,33 +58,38 @@ TRADER_DASHBOARD_CSS = r"""
     }
     h1 { margin: 0 0 6px; font-size: 28px; }
     .sub { color: var(--muted); }
-    .theme-toggle {
-      border: 1px solid var(--line);
-      background: color-mix(in srgb, var(--panel) 88%, transparent);
-      color: var(--text);
-      border-radius: 999px;
-      padding: 9px 12px;
-      font: inherit;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .theme-toggle.primary {
-      background: color-mix(in srgb, var(--accent) 22%, var(--panel));
-      border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
-    }
-    .settings-toggle {
+    .icon-toggle, .settings-toggle {
       border: 1px solid var(--line);
       background: color-mix(in srgb, var(--panel) 88%, transparent);
       color: var(--text);
       border-radius: 999px;
       width: 42px;
       height: 42px;
+      padding: 0;
       font: inherit;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       font-size: 18px;
+      white-space: nowrap;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+    .icon-toggle:hover, .settings-toggle:hover {
+      transform: translateY(-1px);
+      border-color: color-mix(in srgb, var(--accent) 44%, var(--line));
+    }
+    .icon-toggle:active, .settings-toggle:active {
+      transform: translateY(0);
+    }
+    .icon-toggle:focus-visible, .settings-toggle:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 60%, white);
+      outline-offset: 2px;
+    }
+    .icon-toggle svg {
+      width: 22px;
+      height: 22px;
+      display: block;
     }
     .controls {
       display: flex;
@@ -125,7 +130,7 @@ TRADER_DASHBOARD_CSS = r"""
     }
     .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
       margin-bottom: 18px;
     }
@@ -454,7 +459,7 @@ TRADER_DASHBOARD_CSS = r"""
     body.mobile .topbar > div:first-child {
       width: 100%;
     }
-    body.mobile .theme-toggle {
+    body.mobile .icon-toggle {
       align-self: flex-end;
     }
     body.mobile h1 { font-size: 22px; }
@@ -511,5 +516,8 @@ TRADER_DASHBOARD_CSS = r"""
       max-width: 100%;
     }
     body.mobile .chart-wrap { height: 220px; }
+    @media (max-width: 1220px) {
+      .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
     @media (max-width: 980px) { .tables { grid-template-columns: 1fr; } }
 """
