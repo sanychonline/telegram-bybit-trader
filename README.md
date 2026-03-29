@@ -1,180 +1,262 @@
 # Trader Bot
 
-## What this project is
+## Просте пояснення
 
-`trader-bot` is a standalone Telegram-to-Bybit execution bot.
+`trader-bot` це сервіс, який:
+- читає торгові сигнали з Telegram-каналу;
+- розпізнає в них `LONG`, `SHORT`, `entry`, `SL`, `TP`;
+- перевіряє сигнал;
+- відкриває угоду на Bybit;
+- далі супроводжує угоду без ручного втручання;
+- за бажанням показує веб-дашборд зі станом акаунта і угод.
 
-It is responsible for:
-- listening to a Telegram channel with trading signals;
-- parsing `LONG/SHORT`, `entry`, `SL`, and `TP`;
-- validating and sizing trusted signals;
-- placing orders on Bybit;
-- managing trades after entry;
-- reacting to follow-up events such as `TP` replies and `BE` / breakeven moves;
-- storing local trade state;
-- writing logs and CSV reports;
-- exposing an optional live dashboard for account and trade monitoring.
+Простими словами: якщо у вас є канал, де публікуються сигнали у зрозумілому форматі, цей сервіс може автоматично виконувати їх на біржі.
 
-Main entry point:
+## Для кого цей проєкт
+
+Цей проєкт підійде, якщо ви:
+- хочете автоматизувати виконання Telegram-сигналів;
+- розумієте, що бот працює з реальними або тестовими коштами;
+- готові спочатку все перевірити на `testnet`.
+
+Цей проєкт не підійде, якщо ви:
+- ще не маєте джерела сигналів;
+- не хочете працювати з Docker;
+- не готові контролювати ризики вручну.
+
+## Що потрібно перед стартом
+
+Перед запуском підготуйте:
+- встановлений `Docker` і `Docker Compose`;
+- акаунт Bybit;
+- `API key` і `API secret` від Bybit;
+- `API ID` і `API HASH` від Telegram;
+- `chat id` каналу, який бот буде слухати;
+- розуміння, чи ви запускаєтеся в `testnet`, чи в реальному середовищі.
+
+Якщо ви не технічна людина, сприймайте `.env` як “анкету налаштувань”, яку треба один раз заповнити перед запуском.
+
+## Що знаходиться в папці
+
+Основний запуск:
 - `app/start.py`
 
-Runtime data layout:
-- `data/caches` — rebuildable caches
-- `data/reports` — logs and CSV reports
-- `data/storage` — `trades`, `session`, healthcheck, local state
+Дані, які сервіс створює під час роботи:
+- `data/caches` — допоміжні тимчасові дані, які можна відбудувати;
+- `data/reports` — логи і CSV-звіти;
+- `data/storage` — локальний стан бота, історія угод, сесія Telegram.
 
-## Setup
+## Швидкий старт
 
-### 1. Create `.env`
+### 1. Створіть файл налаштувань
 
-The project includes:
+У папці вже є шаблон:
 - `.env.default`
 
-Create your working config:
+Створіть робочий файл:
 
 ```bash
 cp .env.default .env
 ```
 
-Then fill in:
+### 2. Заповніть головні змінні
+
+Відкрийте `.env` і замініть значення на свої:
 - `BYBIT_API_KEY`
 - `BYBIT_API_SECRET`
+- `BYBIT_TESTNET`
 - `TELEGRAM_API_ID`
 - `TELEGRAM_API_HASH`
 - `TELEGRAM_CHAT_ID`
-- `BRAND_NAME` — your project / dashboard brand label, for example `DUMMY PROJECT`
+- `BRAND_NAME`
 
-### 2. Telegram session
+Мінімально без цього сервіс не має сенсу запускати.
 
-Telethon stores the session here:
-- `data/storage/session.session`
+### 3. Рекомендований перший запуск
 
-On first successful login the file will be created automatically.
+Для першого старту безпечніше так:
+- залишити `BYBIT_TESTNET=true`;
+- залишити `MAX_POSITION_MULTIPLIER=1`;
+- не вмикати дашборд, якщо він вам поки не потрібен;
+- переконатися, що Telegram-канал і Bybit-ключі тестові.
 
-### 3. Important `.env` variables
-
-- `DATA_DIR` — container path for mounted local `./data`
-- `TZ` — timezone used in logs
-- `BRAND_NAME` — your visible project brand used in the dashboard title, footer, and browser tab label
-- `LOG_TO_FILE` — whether to write `data/reports/bot.log`
-- `LOG_LEVEL` — `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`
-- `LOG_MAX_BYTES` — max size of a single log file before rotation
-- `LOG_BACKUP_COUNT` — number of rotated log files to keep
-- `BYBIT_TESTNET` — `true` for testnet, `false` for prod
-- `DASHBOARD_ENABLED` — enable built-in trader dashboard
-- `DASHBOARD_HOST` — bind address for the dashboard web server
-- `DASHBOARD_PORT` — dashboard port, default `1002`
-- `DASHBOARD_REFRESH_SEC` — auto-refresh interval for dashboard data
-- `MAX_POSITION_MULTIPLIER` — exposure cap relative to balance
-
-## Run
-
-Start:
+### 4. Запустіть сервіс
 
 ```bash
 docker compose up --build -d
 ```
 
-Stop:
+### 5. Перевірте, що все працює
 
-```bash
-docker compose down
-```
-
-Logs:
+Подивіться логи:
 
 ```bash
 docker compose logs -f bot
 ```
 
-Dashboard:
+Нормальна поведінка після старту:
+- контейнер не падає відразу;
+- бот просить або створює Telegram-сесію при першому вході;
+- у логах немає постійних помилок автентифікації;
+- з’являються файли в `data/storage` і `data/reports`.
+
+### 6. Зупинка
 
 ```bash
-http://localhost:1002/
+docker compose down
 ```
 
-The UI container starts together with the backend. The actual dashboard must still be enabled with:
-- `DASHBOARD_ENABLED=true` in `.env`
+## Як це працює по кроках
 
-## How it works
+Під час роботи бот проходить такий шлях:
+1. Читає нові повідомлення з Telegram.
+2. Пробує зрозуміти, чи це торговий сигнал.
+3. Витягує з нього напрям, точки входу, стоп і тейки.
+4. Перевіряє, чи сигнал можна виконувати.
+5. Розраховує обсяг позиції.
+6. Відправляє ордер на Bybit.
+7. Стежить за відкритою угодою.
+8. Реагує на оновлення на кшталт `TP` або `BE`.
+9. Записує все у логи та локальні файли.
 
-Flow:
-- Telegram messages enter through `app/classes/telegram/telegram_client.py`
-- parsing is handled in `app/classes/telegram/parser.py`
-- messages are processed in `app/classes/trade_manager/worker.py`
-- signal validation and sizing happen in `app/classes/trade_manager/execution.py`
-- orders are sent through `app/classes/bybit_client/bybit_client.py`
-- trade lifecycle handling is done in `app/classes/trade_manager/order_watcher.py`
-- reconciliation is done in `app/classes/trade_manager/reconciliation.py`
-- local state is stored in `app/classes/reporting/storage.py`
+Важливо:
+- бот працює тільки з новими повідомленнями після запуску;
+- він не прокручує стару історію каналу назад;
+- якщо по символу вже є активна угода, бот не відкриває дубль;
+- якщо захист позиції не вдається виставити коректно, бот намагається не залишити угоду “без нагляду”.
 
-Behavior notes:
-- the bot only processes new live Telegram messages after startup; it does not replay old chat history;
-- the same symbol is locked while an entry order or open position already exists;
-- partial fills are protected immediately, without waiting for full fill;
-- repeated protection failures escalate into an emergency abort to avoid leaving positions unprotected;
-- the project is split into separate backend and UI containers, so restarting the dashboard no longer restarts the trading bot itself.
+## Пояснення головних налаштувань
 
-## Runtime outputs
+### Біржа
 
-- bot log: `data/reports/bot.log`
-  size-based rotation is enabled through `LOG_MAX_BYTES` and `LOG_BACKUP_COUNT`
-- closed trade report: `data/reports/report.csv`
-- local active/history state: `data/storage/trades.json`
-- functional health state: `data/storage/healthcheck.json`
-- Telethon session: `data/storage/session.session`
+- `BYBIT_API_KEY` — ключ доступу до біржі.
+- `BYBIT_API_SECRET` — секретний ключ біржі.
+- `BYBIT_TESTNET` — `true` для тестового середовища, `false` для реальної торгівлі.
 
-## Dashboard
+Якщо ви не впевнені, завжди починайте з `true`.
 
-When `DASHBOARD_ENABLED=true`, the project runs:
-- `bot` — trade execution backend
-- `ui` — dashboard container that proxies requests to the backend API
+### Telegram
 
-The trader dashboard on `DASHBOARD_PORT` shows:
-- account metrics: available balance, wallet balance, equity;
-- trade metrics: open trades, closed trades, wins, losses, winrate, non-loss rate, total `TP hits`, and `SL hits`;
-- PnL metrics: realized and unrealized PnL;
-- active and closed trade tables;
-- balance curve with a shared range filter:
-  `today`, `current month`, `month`, `previous month`, `half of year`, `year`, `previous year`, `all time`.
+- `TELEGRAM_API_ID` — ідентифікатор вашого Telegram API.
+- `TELEGRAM_API_HASH` — секрет Telegram API.
+- `TELEGRAM_CHAT_ID` — ID каналу, який треба слухати.
 
-The page auto-refreshes without full reload using the internal JSON API.
+### Назва і зовнішній вигляд
 
-Current dashboard behavior:
-- desktop and mobile layouts are handled automatically;
-- tables collapse into mobile-friendly card rows on narrow screens;
-- the balance chart supports hover inspection with a moving marker, vertical guide line, and balance/time tooltip;
-- the default stats period is `current month`;
-- active trades include a compact `Health` indicator:
-  `SL -> BE -> next TP`, with a moving dot based on the latest price;
-- active trades show both already realized profit and still-floating unrealized profit;
-- trades that are not yet open show `PENDING` instead of a live health rail.
+- `BRAND_NAME` — назва, яка буде показуватися в дашборді.
+- `DISCLAIMER_TEXT` — текст попередження в інтерфейсі.
 
-## Logging
+### Логи
 
-Recommended levels:
-- `DEBUG` — full routing, skip reasons, sync details, and diagnostics
-- `INFO` — business events such as accepted signals, fills, protection syncs, and closes
-- `WARNING` — events that need attention but do not stop the service
-- `ERROR` — operation-level failures
-- `CRITICAL` — top-level crashes or dangerous states such as failed emergency exits
+- `LOG_TO_FILE` — чи зберігати лог ще й у файл.
+- `LOG_LEVEL` — наскільки детальні логи ви хочете.
+- `LOG_MAX_BYTES` — максимальний розмір одного файла логу.
+- `LOG_BACKUP_COUNT` — скільки старих файлів логу зберігати.
 
-If `LOG_TO_FILE=true`, the bot writes both to Docker logs and to `data/reports/bot.log`.
+Для більшості випадків:
+- `INFO` підходить для звичайної роботи;
+- `DEBUG` корисний під час налаштування і пошуку проблем.
 
-## Disclaimer
+### Дашборд
 
-This project is provided "as is", without any warranty of correctness, profitability, or fitness for a particular purpose.
+- `DASHBOARD_ENABLED` — вмикає веб-інтерфейс.
+- `DASHBOARD_HOST` — адреса, на якій слухає веб-сервіс усередині контейнера.
+- `DASHBOARD_PORT` — порт, через який ви відкриватимете дашборд.
+- `DASHBOARD_REFRESH_SEC` — як часто сторінка оновлюється.
 
-Using this bot for exchange trading involves financial risk, including partial or total loss of funds. All decisions regarding setup, launch, testnet or production use, and all trading results are entirely the responsibility of the person running the system.
+Якщо `DASHBOARD_ENABLED=true`, сторінка буде доступна за адресою:
 
-The authors, contributors, and anyone involved in development or setup are not responsible for:
-- financial losses;
-- missed profits;
-- order execution errors;
-- failures of the exchange, Telegram, network, Docker, VPS/NAS, or local environment;
-- incorrect user configuration, credentials, or runtime setup.
+```text
+http://<dashboard-host>:<dashboard-port>/
+```
 
-Before using the bot with real funds, it is strongly recommended to:
-- validate the logic on testnet;
-- test the system with small amounts;
-- independently verify signal quality, risk management, and runtime behavior.
+### Ризик
+
+- `MAX_POSITION_MULTIPLIER` — обмежувач розміру позиції відносно балансу.
+
+Якщо ви не змінюєте цю змінну, бот поводиться консервативніше, ніж при агресивних налаштуваннях.
+
+## Що саме побачите в дашборді
+
+Коли дашборд увімкнено, запускаються два контейнери:
+- `bot` — основна логіка торгівлі;
+- `web` — окрема веб-сторінка.
+
+У дашборді можна побачити:
+- баланс і equity;
+- кількість відкритих і закритих угод;
+- winrate і non-loss rate;
+- realized та unrealized `PnL`;
+- активні угоди;
+- закриті угоди;
+- криву балансу за різні періоди.
+
+Це зручно для контролю, але не замінює ручну перевірку ризиків.
+
+## Які файли з’являються під час роботи
+
+- `data/reports/bot.log` — основний лог роботи;
+- `data/reports/report.csv` — CSV-звіт по закритих угодах;
+- `data/storage/trades.json` — локальний стан активних і минулих угод;
+- `data/storage/healthcheck.json` — файл стану сервісу;
+- `data/storage/session.session` — Telegram-сесія.
+
+## Типові проблеми
+
+### Бот не стартує
+
+Перевірте:
+- чи існує `.env`;
+- чи заповнені ключі Bybit і Telegram;
+- чи немає зайвих пробілів у значеннях;
+- чи Docker справді запущений.
+
+### Telegram просить вхід або код
+
+Це нормально при першому старті. Після успішного входу сервіс створює файл сесії і потім зазвичай не питає його повторно.
+
+### Немає угод
+
+Можливі причини:
+- канал не той;
+- формат повідомлень не відповідає парсеру;
+- бот бачить сигнал, але відхиляє його через правила фільтрації;
+- ви дивитесь `testnet`, а очікуєте поведінку продового середовища.
+
+### Дашборд не відкривається
+
+Перевірте:
+- чи `DASHBOARD_ENABLED=true`;
+- чи контейнер `web` запустився;
+- чи порт `DASHBOARD_PORT` не зайнятий іншою програмою.
+
+## Корисні команди
+
+Запуск:
+
+```bash
+docker compose up --build -d
+```
+
+Зупинка:
+
+```bash
+docker compose down
+```
+
+Логи бота:
+
+```bash
+docker compose logs -f bot
+```
+
+## Важливе попередження
+
+Цей проєкт може працювати з реальними грошима. Помилка в налаштуванні, неправильний сигнал або збій мережі можуть призвести до фінансових втрат.
+
+Рекомендований порядок запуску:
+1. Спочатку `testnet`.
+2. Потім невеликі суми.
+3. Лише після цього реальне використання.
+
+Проєкт надається “як є”, без гарантій прибутковості або безпомилкової роботи.

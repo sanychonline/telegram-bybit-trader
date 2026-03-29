@@ -124,6 +124,7 @@ TRADER_DASHBOARD_CSS = r"""
     .red { color: var(--red); }
     .amber { color: var(--amber); }
     .tables { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .tables .panel { min-height: 560px; }
     .chart-panel { margin-top: 16px; }
     table { width: 100%; border-collapse: collapse; }
     th, td {
@@ -139,6 +140,33 @@ TRADER_DASHBOARD_CSS = r"""
       border-radius: 999px;
       border: 1px solid var(--line);
       font-size: 11px;
+    }
+    .table-pager {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .pager-btn {
+      min-width: 34px;
+      height: 34px;
+      padding: 0 10px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+    .pager-btn.active {
+      background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+      border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+    }
+    .pager-btn:disabled {
+      opacity: 0.45;
+      cursor: default;
     }
     .health-cell { min-width: 180px; }
     .health-pending {
@@ -305,6 +333,8 @@ TRADER_DASHBOARD_CSS = r"""
     body.mobile .card, body.mobile .panel { padding: 12px; border-radius: 14px; }
     body.mobile .value { font-size: 19px; }
     body.mobile .tables { grid-template-columns: 1fr; gap: 12px; }
+    body.mobile .tables .panel { min-height: 420px; }
+    body.mobile .table-pager { justify-content: center; }
     body.mobile table, body.mobile thead, body.mobile tbody, body.mobile th, body.mobile td, body.mobile tr { display: block; width: 100%; }
     body.mobile thead { display: none; }
     body.mobile tbody tr {

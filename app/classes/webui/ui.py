@@ -3,7 +3,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from config import BRAND_NAME, DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_REFRESH_SEC
+from config import BRAND_NAME, DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_REFRESH_SEC, DISCLAIMER_TEXT
 from classes.reporting.dashboard_data import DashboardDataService
 from classes.webui.renderers.trader_dashboard import render_trader_dashboard_html
 
@@ -20,7 +20,7 @@ class DashboardService:
 
     def _html(self):
         refresh_ms = self.refresh_sec * 1000
-        return render_trader_dashboard_html(BRAND_NAME, refresh_ms)
+        return render_trader_dashboard_html(BRAND_NAME, refresh_ms, DISCLAIMER_TEXT)
 
     def _make_handler(self):
         service = self

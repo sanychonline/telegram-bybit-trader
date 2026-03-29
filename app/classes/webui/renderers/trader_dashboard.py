@@ -1,13 +1,16 @@
+import html
+
 from classes.webui.assets.trader_dashboard_css import TRADER_DASHBOARD_CSS
 from classes.webui.assets.trader_dashboard_js import build_trader_dashboard_js
 from classes.webui.i18n.registry import LANGUAGE_OPTIONS
 
 
-def render_trader_dashboard_html(brand_name, refresh_ms):
+def render_trader_dashboard_html(brand_name, refresh_ms, disclaimer_text):
     options_html = "\n".join(
         f'            <option value="{code}">{label}</option>'
         for code, label in LANGUAGE_OPTIONS
     )
+    disclaimer_html = html.escape(disclaimer_text)
     script = build_trader_dashboard_js(brand_name, refresh_ms)
     return f"""<!doctype html>
 <html lang="en">
@@ -57,6 +60,7 @@ def render_trader_dashboard_html(brand_name, refresh_ms):
           <thead><tr><th>Symbol</th><th>Status</th><th>Last</th><th>Health</th><th>Realized</th><th>Unrealized</th></tr></thead>
           <tbody id="active-body"></tbody>
         </table>
+        <div class="table-pager" id="active-pager"></div>
       </div>
       <div class="panel">
         <h3>Closed Trades</h3>
@@ -64,6 +68,7 @@ def render_trader_dashboard_html(brand_name, refresh_ms):
           <thead><tr><th>Symbol</th><th>Reason</th><th>Realized</th><th>Updated</th></tr></thead>
           <tbody id="closed-body"></tbody>
         </table>
+        <div class="table-pager" id="closed-pager"></div>
       </div>
     </div>
     <div class="panel chart-panel">
@@ -76,7 +81,7 @@ def render_trader_dashboard_html(brand_name, refresh_ms):
     </div>
     <div class="footer">
       <div class="footer-brand">{brand_name} © 2026</div>
-      <div class="footer-note" id="footer-disclaimer">For informational purposes only. Not financial advice.</div>
+      <div class="footer-note" id="footer-disclaimer">{disclaimer_html}</div>
     </div>
   </div>
   <script>

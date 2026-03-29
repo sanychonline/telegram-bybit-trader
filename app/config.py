@@ -23,6 +23,7 @@ DATA_STORAGE_DIR = f"{DATA_DIR}/storage"
 
 TZ = get_env("TZ", "UTC")
 BRAND_NAME = get_env("BRAND_NAME", required=True)
+DISCLAIMER_TEXT = get_env("DISCLAIMER_TEXT", required=True)
 LOG_TO_FILE = get_env("LOG_TO_FILE", "false").lower() == "true"
 LOG_LEVEL = get_env("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = get_env("LOG_MAX_BYTES", 20 * 1024 * 1024, cast=int)
@@ -38,7 +39,7 @@ TELEGRAM_CHAT_ID = get_env("TELEGRAM_CHAT_ID", required=True, cast=int)
 
 DASHBOARD_ENABLED = get_env("DASHBOARD_ENABLED", "false").lower() == "true"
 DASHBOARD_HOST = get_env("DASHBOARD_HOST", "0.0.0.0")
-DASHBOARD_PORT = get_env("DASHBOARD_PORT", 9988, cast=int)
+DASHBOARD_PORT = 1002
 DASHBOARD_REFRESH_SEC = get_env("DASHBOARD_REFRESH_SEC", 5, cast=int)
 
 MAX_POSITION_MULTIPLIER = get_env("MAX_POSITION_MULTIPLIER", 1.0, cast=float)

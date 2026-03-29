@@ -8,10 +8,15 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
     return f"""
     const refreshMs = {refresh_ms};
     const baseTitle = {json.dumps(f"{brand_name} Trader", ensure_ascii=False)};
+    const pageSize = 10;
     const langCookie = 'ui_lang';
     let currentRange = 'current_month';
     let currentLang = 'en';
     let chartState = [];
+    let activeTradesData = [];
+    let closedTradesData = [];
+    let activePage = 1;
+    let closedPage = 1;
     const translations = {translations_json};
     function tr(text) {{
       const dict = translations[currentLang] || translations.en;
@@ -84,8 +89,6 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       document.querySelectorAll('th').forEach(th => {{
         th.textContent = tr(th.textContent.trim());
       }});
-      const disclaimer = document.getElementById('footer-disclaimer');
-      if (disclaimer) disclaimer.textContent = tr('disclaimer');
       applyTheme(getCookie('ui_theme') || 'auto');
     }}
     function applyEmbedMode() {{
@@ -95,6 +98,8 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       if (button) button.style.display = 'none';
       const lang = document.getElementById('lang-select')?.closest('.lang-control');
       if (lang) lang.style.display = 'none';
+      const footer = document.querySelector('.footer');
+      if (footer) footer.style.display = 'none';
     }}
     function initThemeToggle() {{
       const order = ['auto', 'day', 'night'];
@@ -155,6 +160,19 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       }};
       return labels[raw] || raw.replaceAll('_', ' ');
     }}
+    function formatStatus(value) {{
+      const raw = String(value || '').trim().toUpperCase();
+      const labels = {{
+        FILLED: tr('FILLED'),
+        OPEN: tr('OPEN'),
+        PUBLISHED: tr('PUBLISHED'),
+        PENDING: tr('PENDING'),
+        LIVE: tr('LIVE'),
+        BE_UPDATED: 'BE',
+        CLOSED: tr('CLOSED'),
+      }};
+      return labels[raw] || raw.replaceAll('_', ' ');
+    }}
     function tradeHealth(t) {{
       if (t.status !== 'FILLED') {{
         return `<span class="health-pending">${{tr('PENDING')}}</span>`;
@@ -204,7 +222,7 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
     function activeRow(t) {{
       return `<tr>
         <td data-label="Symbol">${{t.symbol}} ${{t.side}}</td>
-        <td data-label="Status"><span class="badge">${{t.status}}</span></td>
+        <td data-label="Status"><span class="badge">${{formatStatus(t.status)}}</span></td>
         <td data-label="Last">${{t.last_price ?? ''}}</td>
         <td data-label="Health" class="health-cell">${{tradeHealth(t)}}</td>
         <td data-label="Realized" class="${{cls(t.realized_pnl)}}">${{fmt(t.realized_pnl)}}</td>
@@ -218,6 +236,55 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
         <td data-label="Realized" class="${{cls(t.pnl)}}">${{fmt(t.pnl)}}</td>
         <td data-label="Updated">${{formatTime(t.updated_at)}}</td>
       </tr>`;
+    }}
+    function slicePage(items, page) {{
+      const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+      const safePage = Math.max(1, Math.min(page, totalPages));
+      const start = (safePage - 1) * pageSize;
+      return {{
+        page: safePage,
+        totalPages,
+        items: items.slice(start, start + pageSize),
+      }};
+    }}
+    function renderPager(containerId, page, totalPages, onSelect) {{
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (totalPages <= 1) {{
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+      }}
+      container.style.display = 'flex';
+      const pages = [];
+      for (let i = 1; i <= totalPages; i += 1) pages.push(i);
+      container.innerHTML = [
+        `<button class="pager-btn" data-page="${{page - 1}}" ${{page <= 1 ? 'disabled' : ''}}>‹</button>`,
+        ...pages.map((value) => `<button class="pager-btn ${{value === page ? 'active' : ''}}" data-page="${{value}}">${{value}}</button>`),
+        `<button class="pager-btn" data-page="${{page + 1}}" ${{page >= totalPages ? 'disabled' : ''}}>›</button>`,
+      ].join('');
+      container.querySelectorAll('.pager-btn[data-page]').forEach((button) => {{
+        if (button.disabled) return;
+        button.addEventListener('click', () => onSelect(Number(button.dataset.page || page)));
+      }});
+    }}
+    function renderActiveTrades() {{
+      const state = slicePage(activeTradesData, activePage);
+      activePage = state.page;
+      document.getElementById('active-body').innerHTML = state.items.map(activeRow).join('') || `<tr><td colspan="6">${{tr('noActive')}}</td></tr>`;
+      renderPager('active-pager', state.page, state.totalPages, (nextPage) => {{
+        activePage = nextPage;
+        renderActiveTrades();
+      }});
+    }}
+    function renderClosedTrades() {{
+      const state = slicePage(closedTradesData, closedPage);
+      closedPage = state.page;
+      document.getElementById('closed-body').innerHTML = state.items.map(closedRow).join('') || `<tr><td colspan="4">${{tr('noClosed')}}</td></tr>`;
+      renderPager('closed-pager', state.page, state.totalPages, (nextPage) => {{
+        closedPage = nextPage;
+        renderClosedTrades();
+      }});
     }}
     function applyDeviceMode() {{
       const isMobile = window.matchMedia('(max-width: 820px)').matches || window.matchMedia('(pointer: coarse)').matches;
@@ -373,8 +440,10 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
         card(tr('SL hits'), s.sl_hits_total),
       ].join('');
       setPnlTitle(s.unrealized_pnl);
-      document.getElementById('active-body').innerHTML = data.active_trades.map(activeRow).join('') || `<tr><td colspan="6">${{tr('noActive')}}</td></tr>`;
-      document.getElementById('closed-body').innerHTML = data.closed_trades.map(closedRow).join('') || `<tr><td colspan="4">${{tr('noClosed')}}</td></tr>`;
+      activeTradesData = Array.isArray(data.active_trades) ? data.active_trades : [];
+      closedTradesData = Array.isArray(data.closed_trades) ? data.closed_trades : [];
+      renderActiveTrades();
+      renderClosedTrades();
       await refreshEquity();
     }}
     const rangeSelect = document.getElementById('range-select');

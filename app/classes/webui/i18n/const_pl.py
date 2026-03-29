@@ -1,6 +1,5 @@
 TRANSLATIONS = {
     "theme": "Motyw",
-    "disclaimer": "Wyłącznie w celach informacyjnych. To nie jest porada finansowa.",
     "statsPeriod": "Okres statystyk",
     "auto": "auto",
     "day": "dzień",

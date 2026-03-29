@@ -1,3 +1,4 @@
+from config import DISCLAIMER_TEXT
 from classes.webui.i18n.const_de import TRANSLATIONS as DE_TRANSLATIONS
 from classes.webui.i18n.const_en import TRANSLATIONS as EN_TRANSLATIONS
 from classes.webui.i18n.const_es import TRANSLATIONS as ES_TRANSLATIONS
@@ -15,10 +16,10 @@ LANGUAGE_OPTIONS = (
 )
 
 TRANSLATIONS = {
-    "en": EN_TRANSLATIONS,
-    "de": DE_TRANSLATIONS,
-    "es": ES_TRANSLATIONS,
-    "pl": PL_TRANSLATIONS,
-    "uk": UA_TRANSLATIONS,
-    "fr": FR_TRANSLATIONS,
+    "en": {**EN_TRANSLATIONS, "disclaimer": DISCLAIMER_TEXT},
+    "de": {**DE_TRANSLATIONS, "disclaimer": DISCLAIMER_TEXT},
+    "es": {**ES_TRANSLATIONS, "disclaimer": DISCLAIMER_TEXT},
+    "pl": {**PL_TRANSLATIONS, "disclaimer": DISCLAIMER_TEXT},
+    "uk": {**UA_TRANSLATIONS, "disclaimer": DISCLAIMER_TEXT},
+    "fr": {**FR_TRANSLATIONS, "disclaimer": DISCLAIMER_TEXT},
 }

@@ -8,6 +8,8 @@ services:
     container_name: trader-bot
     env_file:
       - .env
+    environment:
+      DASHBOARD_ENABLED: "false"
 
     volumes:
       - ./data:${DATA_DIR:-/opt/bot/data}
@@ -21,38 +23,24 @@ services:
 
     restart: unless-stopped
 
-    networks:
-      - default
-      - hub-shared
-
-  ui:
+  web:
     build:
       context: .
       dockerfile: dockerfiles/Dockerfile
 
-    image: trader-bot-ui:latest
-    container_name: trader-bot-ui
+    image: trader-bot-web:latest
+    container_name: trader-bot-web
     env_file:
       - .env
+    command: ["python", "start_web.py"]
 
-    environment:
-      UI_PROXY_TARGET: "http://bot:${DASHBOARD_PORT:-1002}"
-
-    command: ["python", "-m", "classes.reporting.ui_proxy"]
+    volumes:
+      - ./data:${DATA_DIR:-/opt/bot/data}
 
     depends_on:
       - bot
 
     ports:
-      - "${DASHBOARD_PORT:-1002}:${DASHBOARD_PORT:-1002}"
+      - "${DASHBOARD_PORT:-1002}:1002"
 
     restart: unless-stopped
-
-    networks:
-      - default
-      - hub-shared
-
-networks:
-  hub-shared:
-    name: services-hub-shared
-    external: true

@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 UI_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
-UI_PORT = int(os.getenv("DASHBOARD_PORT", "9988"))
+UI_PORT = 1002
 UI_PROXY_TARGET = os.getenv("UI_PROXY_TARGET", f"http://127.0.0.1:{UI_PORT}")
 
 HOP_BY_HOP_HEADERS = {
