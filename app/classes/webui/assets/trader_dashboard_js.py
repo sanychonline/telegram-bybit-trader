@@ -21,6 +21,7 @@ def build_trader_dashboard_js(refresh_ms):
     let lastExchangeStatusKey = '';
     let settingsPayload = null;
     let lastSignalSummary = null;
+    let lastSignalMetaHtml = '';
     const translations = {translations_json};
     const themeModes = ['auto', 'day', 'night'];
     const settingsGroups = {{
@@ -134,6 +135,14 @@ def build_trader_dashboard_js(refresh_ms):
           </div>
         </div>
       `;
+    }}
+    function updateSignalMeta(summary) {{
+      const signalMeta = document.getElementById('signal-meta');
+      if (!signalMeta) return;
+      const html = formatSignalMeta(summary);
+      if (html === lastSignalMetaHtml) return;
+      lastSignalMetaHtml = html;
+      signalMeta.innerHTML = html;
     }}
     function setPnlTitle(value) {{
       const pnl = Number(value || 0);
@@ -267,7 +276,7 @@ def build_trader_dashboard_js(refresh_ms):
       if (panelTitles[2]) panelTitles[2].textContent = tr('Balance History');
       document.getElementById('equity-caption').textContent = tr('Loading balance history...');
       const signalMeta = document.getElementById('signal-meta');
-      if (signalMeta) signalMeta.innerHTML = formatSignalMeta(lastSignalSummary);
+      updateSignalMeta(lastSignalSummary);
       document.querySelectorAll('th').forEach(th => {{
         th.textContent = tr(th.textContent.trim());
       }});
@@ -774,8 +783,7 @@ def build_trader_dashboard_js(refresh_ms):
       const data = await res.json();
       const s = data.summary;
       lastSignalSummary = s;
-      const signalMeta = document.getElementById('signal-meta');
-      if (signalMeta) signalMeta.innerHTML = formatSignalMeta(s);
+      updateSignalMeta(s);
       renderExchangeStatus(s);
       const performanceCards = [
         card(tr('Profit PnL'), displayStat(s.profit_pnl, fmt), cls(s.profit_pnl)),
