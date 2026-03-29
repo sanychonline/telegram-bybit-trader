@@ -267,6 +267,23 @@ class Storage:
                     );
                     CREATE INDEX IF NOT EXISTS idx_telegram_message_registry_updated
                     ON telegram_message_registry(updated_at);
+                    CREATE TABLE IF NOT EXISTS telegram_messages (
+                        message_id TEXT PRIMARY KEY,
+                        chat_id TEXT,
+                        message_date TEXT,
+                        sender_id TEXT,
+                        reply_to_msg_id TEXT,
+                        message_type TEXT,
+                        text TEXT,
+                        source TEXT,
+                        raw_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_telegram_messages_date
+                    ON telegram_messages(message_date);
+                    CREATE INDEX IF NOT EXISTS idx_telegram_messages_created
+                    ON telegram_messages(created_at);
                     CREATE TABLE IF NOT EXISTS bot_trades (
                         trade_id TEXT PRIMARY KEY,
                         symbol TEXT,
@@ -501,6 +518,28 @@ class Storage:
                 continue
         return latest
 
+    def get_latest_telegram_archive_message_id(self):
+        conn = self._db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT message_id
+                FROM telegram_messages
+                WHERE message_id IS NOT NULL AND message_id != ''
+                ORDER BY CAST(message_id AS INTEGER) DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return 0
+        try:
+            return int(row["message_id"])
+        except Exception:
+            return 0
+
     def record_telegram_message(self, message_id, kind=None, trade_id=None, source=None):
         if message_id in (None, ""):
             return None
@@ -544,10 +583,165 @@ class Storage:
 
         return message_id
 
+    def _normalize_message_archive_payload(self, message, source=None):
+        payload = {}
+        if isinstance(message, dict):
+            payload = dict(message)
+        elif hasattr(message, "to_dict"):
+            try:
+                payload = dict(message.to_dict())
+            except Exception:
+                payload = {}
+        else:
+            payload = {
+                "id": getattr(message, "id", None),
+                "date": getattr(message, "date", None),
+                "message": getattr(message, "message", None),
+            }
+
+        message_id = payload.get("id") or payload.get("message_id") or getattr(message, "id", None)
+        message_date = payload.get("date") or payload.get("message_date") or getattr(message, "date", None)
+        sender_id = payload.get("sender_id")
+        if sender_id is None:
+            from_id = payload.get("from_id")
+            if isinstance(from_id, dict):
+                sender_id = from_id.get("user_id") or from_id.get("channel_id") or from_id.get("chat_id")
+            elif hasattr(from_id, "get"):
+                sender_id = from_id.get("user_id") or from_id.get("channel_id") or from_id.get("chat_id")
+            elif from_id is not None:
+                sender_id = getattr(from_id, "user_id", None) or getattr(from_id, "channel_id", None) or getattr(from_id, "chat_id", None)
+
+        reply_to_msg_id = payload.get("reply_to_msg_id")
+        if reply_to_msg_id is None:
+            reply_to = payload.get("reply_to")
+            if isinstance(reply_to, dict):
+                reply_to_msg_id = reply_to.get("reply_to_msg_id") or reply_to.get("reply_to_top_id")
+            elif reply_to is not None:
+                reply_to_msg_id = getattr(reply_to, "reply_to_msg_id", None) or getattr(reply_to, "reply_to_top_id", None)
+
+        message_type = payload.get("message_type") or payload.get("_") or "message"
+        text = payload.get("text")
+        if text is None:
+            text = payload.get("message")
+        if text is None and hasattr(message, "text"):
+            text = getattr(message, "text")
+        if text is None and hasattr(message, "message"):
+            text = getattr(message, "message")
+
+        if hasattr(message_date, "isoformat"):
+            try:
+                message_date = message_date.isoformat()
+            except Exception:
+                message_date = str(message_date)
+        elif message_date is not None:
+            message_date = str(message_date)
+
+        normalized = {
+            "message_id": str(message_id) if message_id not in (None, "") else "",
+            "chat_id": str(payload.get("chat_id") or "") if payload.get("chat_id") not in (None, "") else "",
+            "message_date": message_date or "",
+            "sender_id": str(sender_id) if sender_id not in (None, "") else "",
+            "reply_to_msg_id": str(reply_to_msg_id) if reply_to_msg_id not in (None, "") else "",
+            "message_type": str(message_type or "message"),
+            "text": text if text is not None else "",
+            "source": str(source or payload.get("source") or "telegram"),
+            "raw_json": payload,
+        }
+        return normalized
+
+    def record_telegram_message_archive(self, message, source=None):
+        payload = self._normalize_message_archive_payload(message, source=source)
+        message_id = payload.get("message_id")
+        if not message_id:
+            return None
+
+        now = datetime.utcnow().isoformat()
+        raw_json = json.dumps(payload.get("raw_json"), ensure_ascii=False, default=str)
+        conn = self._db_connect()
+        try:
+            existing = conn.execute(
+                """
+                SELECT created_at
+                FROM telegram_messages
+                WHERE message_id = ?
+                LIMIT 1
+                """,
+                (message_id,),
+            ).fetchone()
+            created_at = existing["created_at"] if existing else now
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO telegram_messages(
+                    message_id, chat_id, message_date, sender_id, reply_to_msg_id,
+                    message_type, text, source, raw_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    message_id,
+                    payload.get("chat_id") or None,
+                    payload.get("message_date") or None,
+                    payload.get("sender_id") or None,
+                    payload.get("reply_to_msg_id") or None,
+                    payload.get("message_type") or "message",
+                    payload.get("text") or "",
+                    payload.get("source") or source or "telegram",
+                    raw_json,
+                    created_at,
+                    now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return message_id
+
+    def get_telegram_messages(self, limit=None):
+        query = """
+            SELECT message_id, chat_id, message_date, sender_id, reply_to_msg_id,
+                   message_type, text, source, raw_json, created_at, updated_at
+            FROM telegram_messages
+            ORDER BY message_date ASC, message_id ASC
+        """
+        params = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(int(limit))
+
+        conn = self._db_connect()
+        try:
+            rows = conn.execute(query, params).fetchall()
+        finally:
+            conn.close()
+
+        result = []
+        for row in rows:
+            payload = {
+                "id": int(row["message_id"]) if str(row["message_id"]).isdigit() else row["message_id"],
+                "date": row["message_date"] or row["created_at"],
+                "text": row["text"] or "",
+                "source": row["source"] or "telegram",
+                "chat_id": row["chat_id"],
+                "sender_id": row["sender_id"],
+                "reply_to_msg_id": row["reply_to_msg_id"],
+                "message_type": row["message_type"],
+                "raw_json": json.loads(row["raw_json"]) if row["raw_json"] else {},
+            }
+            result.append(payload)
+        return result
+
     def clear_telegram_message_registry(self):
         conn = self._db_connect()
         try:
             conn.execute("DELETE FROM telegram_message_registry")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def clear_telegram_messages(self):
+        conn = self._db_connect()
+        try:
+            conn.execute("DELETE FROM telegram_messages")
             conn.commit()
         finally:
             conn.close()

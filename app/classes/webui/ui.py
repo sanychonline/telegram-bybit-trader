@@ -203,6 +203,22 @@ class DashboardService:
                     service._send_json(self, 200, payload)
                     return
 
+                if path_only == "/api/backtest/telegram-messages":
+                    if not service._is_backtest_authorized(self.headers):
+                        service._send_json(
+                            self,
+                            401,
+                            {"ok": False, "error": "unauthorized"},
+                            headers={"WWW-Authenticate": 'Bearer realm="trader-bot-backtest"'},
+                        )
+                        return
+                    payload = {
+                        "ok": True,
+                        "telegram_messages": service.storage.get_telegram_messages(),
+                    }
+                    service._send_json(self, 200, payload)
+                    return
+
                 if path_only == "/health":
                     payload = b'{"ok":true}'
                     self.send_response(200)

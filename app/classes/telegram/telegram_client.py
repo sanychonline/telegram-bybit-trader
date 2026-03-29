@@ -83,7 +83,7 @@ class TelegramService:
             if not await self.client.is_user_authorized():
                 raise Exception("Telegram session is not authorized")
 
-            self.startup_last_message_id = int(storage.get_latest_telegram_message_id() or 0)
+            self.startup_last_message_id = int(storage.get_latest_telegram_archive_message_id() or 0)
             self.logger.info(
                 f"Telegram history sync started | last_known_message_id={self.startup_last_message_id}"
             )
@@ -98,6 +98,12 @@ class TelegramService:
                     kind="history",
                     source="telegram_history_sync",
                 )
+                try:
+                    storage.record_telegram_message_archive(message, source="telegram_history_sync")
+                except Exception as exc:
+                    self.logger.warning(
+                        f"Telegram archive record skipped during sync | message_id={message_id} | error={exc}"
+                    )
                 synced += 1
                 now = time.monotonic()
                 if now - last_status_log_at >= 5:
@@ -180,6 +186,10 @@ class TelegramService:
 
         storage = self._history_sync_storage()
         if storage is not None:
+            try:
+                storage.record_telegram_message_archive(message, source=source)
+            except Exception as exc:
+                self.logger.warning(f"Telegram archive record skipped | message_id={message_id} | error={exc}")
             storage.record_telegram_message(
                 message_id,
                 kind=source,
