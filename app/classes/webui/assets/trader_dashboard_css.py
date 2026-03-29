@@ -108,10 +108,9 @@ TRADER_DASHBOARD_CSS = r"""
     .signal-marquee-track {
       display: flex;
       align-items: center;
-      gap: 36px;
       width: max-content;
       padding: 10px 14px;
-      animation: signal-marquee 22s linear infinite;
+      animation: signal-marquee 88s linear infinite;
       will-change: transform;
     }
     .signal-marquee:hover .signal-marquee-track {
@@ -123,7 +122,6 @@ TRADER_DASHBOARD_CSS = r"""
       gap: 0;
       flex: 0 0 auto;
       width: max-content;
-      padding-right: 36px;
     }
     .signal-chip {
       display: inline-flex;

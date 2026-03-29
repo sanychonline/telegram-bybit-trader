@@ -308,7 +308,7 @@ class DashboardDataService:
         signal_events = self.storage.get_signal_events()
         filtered_signal_events = self._filter_signal_events(signal_events, range_key)
         last_signal = filtered_signal_events[0] if filtered_signal_events else (signal_events[0] if signal_events else None)
-        recent_signals = signal_events[:10]
+        recent_signals = signal_events[:30]
         local_trades = self.storage.get_all_trades()
         filtered_local_trades = self._filter_local_trades(local_trades, range_key)
         sync_meta = self.storage.get_named_sync_state("closed_pnl_history")
