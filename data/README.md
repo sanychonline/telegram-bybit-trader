@@ -23,6 +23,7 @@ Important note:
 - dashboard balances, active trades, closed trades, and performance metrics are exchange-first;
 - SQLite is the primary local storage layer for runtime flow and enrichment.
 - Telegram startup sync is two-layered: first we track known message IDs, then we backfill only missing messages.
+- If required UI settings are missing, the bot starts in maintenance mode and waits for configuration before runtime loops begin.
 
 What to do with it:
 - keep it out of git;

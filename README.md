@@ -81,6 +81,7 @@ docker compose up --build -d
 - execution and dashboard settings
 
 All runtime settings are stored in SQLite. Secrets are stored encrypted in the DB, with a local encryption key file in `data/secrets.key`.
+If the required settings are still empty at startup, the bot stays in maintenance mode and logs a warning until you complete the UI form.
 
 5. Watch the bot:
 
@@ -135,6 +136,7 @@ The Telegram sync state is tracked in SQLite too:
 - `telegram.history_sync.finished_at`
 - `telegram.history_sync.synced_count`
 - `telegram.history_sync.processed_count`
+The startup sync is user-session aware, while live Telegram runtime keeps running through the configured integration once settings are complete.
 
 ## Data Directory Guide
 
@@ -174,3 +176,4 @@ It validates recent heartbeats from:
 - The dashboard may briefly show sync-in-progress states while exchange history is being backfilled.
 - Legacy JSON files can be imported once during migration, but the live app now persists runtime state in SQLite.
 - Runtime secrets, sessions, logs, and SQLite files are ignored by git and should stay out of commits.
+- If the dashboard settings are incomplete, the bot intentionally logs that it is in maintenance mode and waits for configuration before starting the runtime loops.
