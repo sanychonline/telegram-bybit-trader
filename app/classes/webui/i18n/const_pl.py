@@ -1,5 +1,6 @@
 TRANSLATIONS = {
     "theme": "Motyw",
+    "disclaimer": "Wyłącznie w celach informacyjnych. To nie jest porada finansowa.",
     "statsPeriod": "Okres statystyk",
     "auto": "auto",
     "day": "dzień",
@@ -29,7 +30,7 @@ TRANSLATIONS = {
     "Loading balance curve...": "Ładowanie krzywej salda...",
     "Symbol": "Symbol",
     "Status": "Status",
-    "Last": "Ostatni",
+    "Last": "Aktualna cena",
     "Health": "Stan",
     "Realized": "Zrealizowane",
     "Unrealized": "Niezrealizowane",

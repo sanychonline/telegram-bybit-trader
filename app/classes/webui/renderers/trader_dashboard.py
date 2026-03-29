@@ -74,7 +74,10 @@ def render_trader_dashboard_html(brand_name, refresh_ms):
       </div>
       <div class="chart-caption" id="equity-caption">Loading balance curve...</div>
     </div>
-    <div class="footer">{brand_name}</div>
+    <div class="footer">
+      <div class="footer-brand">{brand_name} © 2026</div>
+      <div class="footer-note" id="footer-disclaimer">For informational purposes only. Not financial advice.</div>
+    </div>
   </div>
   <script>
 {script}

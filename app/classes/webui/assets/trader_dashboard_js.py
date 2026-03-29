@@ -84,6 +84,8 @@ def build_trader_dashboard_js(brand_name, refresh_ms):
       document.querySelectorAll('th').forEach(th => {{
         th.textContent = tr(th.textContent.trim());
       }});
+      const disclaimer = document.getElementById('footer-disclaimer');
+      if (disclaimer) disclaimer.textContent = tr('disclaimer');
       applyTheme(getCookie('ui_theme') || 'auto');
     }}
     function applyEmbedMode() {{

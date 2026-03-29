@@ -260,6 +260,14 @@ TRADER_DASHBOARD_CSS = r"""
       font-size: 12px;
       text-align: center;
     }
+    .footer-brand {
+      font-size: 12px;
+    }
+    .footer-note {
+      margin-top: 6px;
+      font-size: 11px;
+      opacity: 0.9;
+    }
     body.mobile .wrap { padding: 14px; }
     body.mobile .topbar {
       align-items: stretch;
