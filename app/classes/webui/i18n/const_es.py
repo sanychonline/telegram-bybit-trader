@@ -24,7 +24,7 @@ TRANSLATIONS = {
     "all time": "todo el período",
     "Trader Bot Dashboard": "Panel del bot de trading",
     "Active Trades": "Operaciones activas",
-    "Closed Trades": "Operaciones cerradas",
+    "Trade History": "Historial de operaciones",
     "Balance History": "Historial de balance",
     "Loading balance history...": "Cargando historial de balance...",
     "Last Signal": "Última señal",

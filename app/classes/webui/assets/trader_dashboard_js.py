@@ -272,7 +272,7 @@ def build_trader_dashboard_js(refresh_ms):
       }});
       const panelTitles = document.querySelectorAll('.panel h3');
       if (panelTitles[0]) panelTitles[0].textContent = tr('Active Trades');
-      if (panelTitles[1]) panelTitles[1].textContent = tr('Closed Trades');
+      if (panelTitles[1]) panelTitles[1].textContent = tr('Trade History');
       if (panelTitles[2]) panelTitles[2].textContent = tr('Balance History');
       document.getElementById('equity-caption').textContent = tr('Loading balance history...');
       const signalMeta = document.getElementById('signal-meta');
@@ -803,7 +803,7 @@ def build_trader_dashboard_js(refresh_ms):
       ];
       const tradeCards = [
         card(tr('Active Trades'), s.open_trades),
-        card(tr('Closed Trades'), s.closed_trades),
+        card(tr('Trade History'), s.closed_trades),
         card(tr('Wins'), s.wins),
         card(tr('Losses'), s.losses),
         card(tr('TP hits'), displayStat(s.tp_hits_total)),

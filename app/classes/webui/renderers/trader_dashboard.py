@@ -97,7 +97,7 @@ def render_trader_dashboard_html(refresh_ms):
         <div class="table-pager" id="active-pager"></div>
       </div>
       <div class="panel">
-        <h3>Closed Trades</h3>
+        <h3>Trade History</h3>
         <table>
           <thead><tr><th>Symbol</th><th>Reason</th><th>Realized</th><th>Updated</th></tr></thead>
           <tbody id="closed-body"></tbody>

@@ -24,7 +24,7 @@ TRANSLATIONS = {
     "all time": "за весь час",
     "Trader Bot Dashboard": "Панель трейдер-бота",
     "Active Trades": "Активні угоди",
-    "Closed Trades": "Закриті угоди",
+    "Trade History": "Історія угод",
     "Balance History": "Історія балансу",
     "Loading balance history...": "Завантаження історії балансу...",
     "Last Signal": "Останній сигнал",
