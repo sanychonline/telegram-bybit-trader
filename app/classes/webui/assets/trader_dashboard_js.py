@@ -22,6 +22,9 @@ def build_trader_dashboard_js(refresh_ms):
     let settingsPayload = null;
     let lastSignalSummary = null;
     let lastSignalMetaHtml = '';
+    let lastSignalMetaKey = '';
+    let signalMarqueeRaf = null;
+    const signalMarqueePxPerSecond = 24;
     const translations = {translations_json};
     const themeModes = ['auto', 'day', 'night'];
     const autoThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -83,6 +86,11 @@ def build_trader_dashboard_js(refresh_ms):
       if (v < 0) return 'red';
       return 'amber';
     }}
+    function rateCls(kind) {{
+      if (kind === 'win' || kind === 'nonloss') return 'green';
+      if (kind === 'loss') return 'red';
+      return 'amber';
+    }}
     function card(label, value, klass='') {{
       return `<div class="card"><div class="label">${{label}}</div><div class="value ${{klass}}">${{value}}</div></div>`;
     }}
@@ -142,9 +150,39 @@ def build_trader_dashboard_js(refresh_ms):
       const signalMeta = document.getElementById('signal-meta');
       if (!signalMeta) return;
       const html = formatSignalMeta(summary);
-      if (html === lastSignalMetaHtml) return;
+      const signals = Array.isArray(summary?.recent_signals) ? summary.recent_signals : [];
+      const key = signals.map((signal) => [
+        signal.message_id || '',
+        signal.created_at || '',
+        signal.symbol || '',
+        signal.side || '',
+        signal.result_emoji || '',
+      ].join(':')).join('|');
+      if (key === lastSignalMetaKey) return;
+      lastSignalMetaKey = key;
       lastSignalMetaHtml = html;
       signalMeta.innerHTML = html;
+      scheduleSignalMarqueeUpdate();
+    }}
+    function updateSignalMarqueeDuration() {{
+      const marquee = document.querySelector('#signal-meta .signal-marquee');
+      if (!marquee) return;
+      const track = marquee.querySelector('.signal-marquee-track');
+      const item = marquee.querySelector('.signal-marquee-item');
+      if (!track || !item) return;
+      const width = item.getBoundingClientRect().width;
+      if (!width) return;
+      const duration = Math.max(width / signalMarqueePxPerSecond, 20);
+      track.style.setProperty('--signal-marquee-duration', `${{duration.toFixed(2)}}s`);
+    }}
+    function scheduleSignalMarqueeUpdate() {{
+      if (signalMarqueeRaf !== null) {{
+        cancelAnimationFrame(signalMarqueeRaf);
+      }}
+      signalMarqueeRaf = requestAnimationFrame(() => {{
+        signalMarqueeRaf = null;
+        updateSignalMarqueeDuration();
+      }});
     }}
     function setPnlTitle(value) {{
       const pnl = Number(value || 0);
@@ -179,11 +217,8 @@ def build_trader_dashboard_js(refresh_ms):
       return autoThemeQuery.matches ? 'night' : 'day';
     }}
     function themeIcon(mode) {{
-      const text = getCssVar('--text', '#ebf3f9');
       const accent = getCssVar('--accent', '#56a6ff');
       const amber = getCssVar('--amber', '#efbe53');
-      const line = getCssVar('--line', '#26415a');
-      const panel2 = getCssVar('--panel2', '#142333');
       if (mode === 'day') {{
         return `
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -204,35 +239,12 @@ def build_trader_dashboard_js(refresh_ms):
       if (mode === 'night') {{
         return `
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <circle cx="13.2" cy="11.8" r="6.1" fill="${{text}}"></circle>
-            <circle cx="16.4" cy="9.8" r="5.2" fill="${{panel2}}"></circle>
-            <circle cx="17.2" cy="16.1" r="1.2" fill="${{line}}"></circle>
+            <path d="M14.8 4.4c-2.4 0-4.6 1-6.1 2.7-1.5 1.7-2.2 3.9-2 6.1.3 2.1 1.3 4 3 5.3 1.7 1.3 3.9 1.9 6 1.5 2.1-.4 4-1.6 5.2-3.4-1.4.1-2.9-.3-4.1-1.2-1.3-.9-2.2-2.2-2.7-3.7-.5-1.5-.5-3.1 0-4.6.4-1.3 1.2-2.5 2.2-3.5-.5-.1-1-.2-1.5-.2z" fill="${{amber}}"></path>
           </svg>
         `;
       }}
       return `
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="theme-auto-split" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
-              <stop offset="50%" stop-color="${{amber}}"></stop>
-              <stop offset="50%" stop-color="${{panel2}}"></stop>
-            </linearGradient>
-          </defs>
-          <circle cx="12" cy="12" r="10" fill="url(#theme-auto-split)"></circle>
-          <circle cx="8.4" cy="8.4" r="3.1" fill="${{amber}}"></circle>
-          <g stroke="${{amber}}" stroke-width="1.2" stroke-linecap="round">
-            <line x1="8.4" y1="2.4" x2="8.4" y2="4.4"></line>
-            <line x1="8.4" y1="12.4" x2="8.4" y2="14.4"></line>
-            <line x1="2.4" y1="8.4" x2="4.4" y2="8.4"></line>
-            <line x1="12.4" y1="8.4" x2="14.4" y2="8.4"></line>
-            <line x1="4.2" y1="4.2" x2="5.5" y2="5.5"></line>
-            <line x1="11.3" y1="11.3" x2="12.6" y2="12.6"></line>
-          </g>
-          <circle cx="16.2" cy="15.2" r="4.9" fill="${{text}}"></circle>
-          <circle cx="18.3" cy="13.3" r="4.2" fill="${{panel2}}"></circle>
-          <circle cx="18.8" cy="17.4" r="1" fill="${{line}}"></circle>
-          <line x1="5" y1="5" x2="19" y2="19" stroke="${{line}}" stroke-width="1" stroke-linecap="round" opacity=".72"></line>
-        </svg>
+        <span class="theme-auto-letter">A</span>
       `;
     }}
     function updateThemeButton(mode) {{
@@ -799,8 +811,8 @@ def build_trader_dashboard_js(refresh_ms):
         card(tr('Profit PnL'), displayStat(s.profit_pnl, fmt), cls(s.profit_pnl)),
         card(tr('Loss PnL'), displayStat(s.loss_pnl, fmt), cls(-(Number(s.loss_pnl || 0)))),
         card(tr('Net Profit'), displayStat(s.net_profit_pnl, fmt), cls(s.net_profit_pnl)),
-        card(tr('Winrate'), displayStat(s.winrate, (value) => `${{fmt(value)}}%`)),
-        card(tr('Lossrate'), displayStat(s.lossrate, (value) => `${{fmt(value)}}%`)),
+        card(tr('Winrate'), displayStat(s.winrate, (value) => `${{fmt(value)}}%`), rateCls('win')),
+        card(tr('Lossrate'), displayStat(s.lossrate, (value) => `${{fmt(value)}}%`), rateCls('loss')),
         card(tr('Unrealized PnL'), displayStat(s.unrealized_pnl, fmt), cls(s.unrealized_pnl)),
       ];
       const capitalCards = [
@@ -869,6 +881,11 @@ def build_trader_dashboard_js(refresh_ms):
     initThemeToggle();
     applyDeviceMode();
     window.addEventListener('resize', applyDeviceMode);
+    window.addEventListener('resize', () => {{
+      if (document.querySelector('#signal-meta .signal-marquee')) {{
+        scheduleSignalMarqueeUpdate();
+      }}
+    }});
     refresh();
     setInterval(refresh, refreshMs);
 """

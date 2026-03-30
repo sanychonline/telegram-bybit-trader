@@ -132,6 +132,7 @@ The dashboard also includes a live signal ticker:
 Active trades keep the order in which they first appeared, so the table does not reshuffle on every refresh.
 
 The dashboard theme toggle follows the system `prefers-color-scheme` setting in real time when `auto` is selected.
+In the compact control block, `auto` is shown as a simple `A` so the theme and language buttons keep the same visual weight across layouts.
 
 The Telegram sync state is tracked in SQLite too:
 - `telegram.history_sync.status`

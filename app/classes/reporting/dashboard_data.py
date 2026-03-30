@@ -239,6 +239,15 @@ class DashboardDataService:
 
             realized_total += realized
             unrealized_total += unrealized
+            created_raw = position.get("createdTime") or position.get("updatedTime")
+            created_at = created_raw
+            try:
+                created_ms = int(created_raw or 0)
+                if created_ms > 0:
+                    created_at = datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc).isoformat()
+            except Exception:
+                created_at = created_raw
+
             updated_raw = position.get("updatedTime") or position.get("createdTime")
             updated_at = updated_raw
             try:
@@ -253,6 +262,7 @@ class DashboardDataService:
                 "side": side,
                 "status": "FILLED",
                 "tp_hits": 0,
+                "created_at": created_at,
                 "entry": entry,
                 "sl": sl,
                 "sl_initial": sl,
@@ -264,7 +274,7 @@ class DashboardDataService:
                 "updated_at": updated_at,
             })
 
-        active_rows.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+        active_rows.sort(key=lambda item: (item.get("created_at") or "", item.get("symbol") or "", item.get("side") or ""))
         return realized_total, unrealized_total, active_rows
 
     def _signal_direction_arrow(self, signal, active_trade=None):

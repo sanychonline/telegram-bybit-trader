@@ -110,11 +110,8 @@ TRADER_DASHBOARD_CSS = r"""
       align-items: center;
       width: max-content;
       padding: 10px 14px;
-      animation: signal-marquee 88s linear infinite;
+      animation: signal-marquee var(--signal-marquee-duration, 60s) linear infinite;
       will-change: transform;
-    }
-    .signal-marquee:hover .signal-marquee-track {
-      animation-play-state: paused;
     }
     .signal-marquee-item {
       display: inline-flex;
@@ -199,7 +196,8 @@ TRADER_DASHBOARD_CSS = r"""
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
+      font-size: 17px;
+      line-height: 1;
       white-space: nowrap;
       transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
     }
@@ -219,6 +217,17 @@ TRADER_DASHBOARD_CSS = r"""
       height: 22px;
       display: block;
     }
+    .theme-auto-letter {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: 0.04em;
+    }
     .controls {
       display: flex;
       align-items: center;
@@ -234,8 +243,9 @@ TRADER_DASHBOARD_CSS = r"""
       background: color-mix(in srgb, var(--panel) 88%, transparent);
       color: var(--text);
       border-radius: 999px;
-      padding: 9px 10px;
-      width: 46px;
+      padding: 0;
+      width: 42px;
+      height: 42px;
       justify-content: center;
       overflow: hidden;
       position: relative;
@@ -252,6 +262,11 @@ TRADER_DASHBOARD_CSS = r"""
       outline: none;
       cursor: pointer;
       opacity: 0;
+    }
+    .lang-control > span {
+      pointer-events: none;
+      font-size: 16px;
+      line-height: 1;
     }
     .lang-select option {
       color: #111;
