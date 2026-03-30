@@ -26,6 +26,8 @@ Important note:
 - SQLite is the primary local storage layer for runtime flow and enrichment.
 - Telegram startup sync is two-layered: first we track known message IDs, then we backfill only missing messages.
 - If required UI settings are missing, the bot starts in maintenance mode and waits for configuration before runtime loops begin.
+- the live signal ticker uses a fixed speed and does not pause on hover;
+- active trades keep their first-seen order so the table does not reshuffle on each refresh.
 
 What to do with it:
 - keep it out of git;

@@ -126,7 +126,10 @@ The dashboard also includes a live signal ticker:
 - uses `🟢` / `🔴` for LONG / SHORT
 - shows `👍` if the related trade closed in profit
 - shows `😢` if the related trade closed in loss
-- keeps the ticker moving right-to-left in a continuous loop
+- keeps the ticker moving right-to-left in a continuous loop at a fixed speed
+- does not pause on hover, so the motion stays smooth during inspection
+
+Active trades keep the order in which they first appeared, so the table does not reshuffle on every refresh.
 
 The dashboard theme toggle follows the system `prefers-color-scheme` setting in real time when `auto` is selected.
 
